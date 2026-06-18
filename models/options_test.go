@@ -196,7 +196,8 @@ func TestApplyOptions_Composition(t *testing.T) {
 	t.Run("multiple options all apply", func(t *testing.T) {
 		t.Parallel()
 
-		sql := builtSQL(t,
+		sql := builtSQL(
+			t,
 			models.WithCondition("population > ?", 100),
 			models.WithOrderBy("name", false),
 			models.WithLimit(5),
@@ -212,7 +213,8 @@ func TestApplyOptions_Composition(t *testing.T) {
 	t.Run("ordering of WHERE clauses is preserved", func(t *testing.T) {
 		t.Parallel()
 
-		sql := builtSQL(t,
+		sql := builtSQL(
+			t,
 			models.WithCondition("a = ?", 1),
 			models.WithCondition("b = ?", 2),
 		)

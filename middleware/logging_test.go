@@ -552,6 +552,37 @@ func BenchmarkLoggingMiddleware_LargeResponse200(b *testing.B) {
 	}
 }
 
+func BenchmarkLoggingMiddleware_RequestPath(b *testing.B) {
+	// A no-op 200 handler isolates the per-request overhead: request-ID
+	// extraction, context injection, the request-start log, and the response
+	// log. Headers are pre-populated so the request-side fields are realistic.
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	mw := middleware.LoggingMiddleware(handler)
+
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(os.Stderr)
+
+	oldSlog := slog.Default()
+
+	slog.SetDefault(slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	defer slog.SetDefault(oldSlog)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/v1/resource", nil)
+		req.Header.Set("X-Request-ID", "bench-req-id")
+		req.Header.Set("User-Agent", "bench-agent/1.0")
+
+		rr := httptest.NewRecorder()
+		mw.ServeHTTP(rr, req)
+	}
+}
+
 func BenchmarkLoggingMiddleware_ErrorResponse(b *testing.B) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)

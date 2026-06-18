@@ -17,24 +17,33 @@ type GORMHealthChecker struct {
 	cfg     *config.Config
 }
 
-// NewGORMHealthChecker creates a new GORM-based health checker.
-// It accepts both write and read database connections.
-// If readDB is nil, only the write database will be checked.
-func NewGORMHealthChecker(writeDB *gorm.DB, cfg *config.Config) *GORMHealthChecker {
-	return &GORMHealthChecker{
-		writeDB: writeDB,
-		readDB:  nil, // Set via SetReadDatabase
-		cfg:     cfg,
+// HealthCheckerOption configures a GORMHealthChecker at construction time.
+type HealthCheckerOption func(*GORMHealthChecker)
+
+// WithReadDatabase attaches a separate read-replica connection to the health
+// checker. When supplied, Check and CheckWithDetails ping the read database in
+// addition to the write database. Omit it (or pass the same handle as the write
+// database) for single-connection deployments.
+func WithReadDatabase(readDB *gorm.DB) HealthCheckerOption {
+	return func(h *GORMHealthChecker) {
+		h.readDB = readDB
 	}
 }
 
-// NewGORMHealthCheckerWithReadWrite creates a new GORM-based health checker with both connections.
-func NewGORMHealthCheckerWithReadWrite(writeDB, readDB *gorm.DB, cfg *config.Config) *GORMHealthChecker {
-	return &GORMHealthChecker{
+// NewGORMHealthChecker creates a new GORM-based health checker for the given
+// write database. Pass WithReadDatabase to also monitor a read replica; without
+// it only the write database is checked.
+func NewGORMHealthChecker(writeDB *gorm.DB, cfg *config.Config, opts ...HealthCheckerOption) *GORMHealthChecker {
+	h := &GORMHealthChecker{
 		writeDB: writeDB,
-		readDB:  readDB,
 		cfg:     cfg,
 	}
+
+	for _, opt := range opts {
+		opt(h)
+	}
+
+	return h
 }
 
 // SetReadDatabase sets the read database connection for health checking.

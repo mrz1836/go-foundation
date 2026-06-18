@@ -128,6 +128,7 @@ func TestGORMHealthChecker_CheckWithDetails(t *testing.T) {
 	})
 }
 
+//nolint:gocognit // Test function with multiple construction sub-tests
 func TestNewGORMHealthChecker(t *testing.T) {
 	t.Parallel()
 
@@ -147,7 +148,49 @@ func TestNewGORMHealthChecker(t *testing.T) {
 		if hc.cfg != cfg {
 			t.Error("cfg not set correctly")
 		}
+
+		if hc.readDB != nil {
+			t.Error("readDB should be nil without WithReadDatabase")
+		}
 	})
+
+	t.Run("WithReadDatabase attaches a read connection", func(t *testing.T) {
+		writeDB := createTestDB(t)
+		readDB := createTestDB(t)
+
+		hc := NewGORMHealthChecker(writeDB, nil, WithReadDatabase(readDB))
+		if hc.readDB != readDB {
+			t.Error("readDB not set by WithReadDatabase")
+		}
+
+		if hc.writeDB != writeDB {
+			t.Error("writeDB not set correctly")
+		}
+	})
+}
+
+func TestGORMHealthChecker_Check_WithReadReplica(t *testing.T) {
+	t.Parallel()
+
+	writeDB := createTestDB(t)
+	readDB := createTestDB(t)
+	hc := NewGORMHealthChecker(writeDB, nil, WithReadDatabase(readDB))
+
+	if err := hc.Check(context.Background()); err != nil {
+		t.Errorf("unexpected error with healthy read replica: %v", err)
+	}
+
+	// Closing the read replica must surface as an unhealthy check.
+	sqlDB, err := readDB.DB()
+	if err != nil {
+		t.Fatalf("failed to get underlying read db: %v", err)
+	}
+
+	_ = sqlDB.Close()
+
+	if err = hc.Check(context.Background()); err == nil {
+		t.Error("expected error when read replica is down")
+	}
 }
 
 // createTestDB creates an in-memory SQLite database for testing.
@@ -302,5 +345,29 @@ func TestGORMHealthChecker_CheckWithDetails_MultipleSuccessfulCalls(t *testing.T
 		if status.Status != StatusHealthy {
 			t.Errorf("check %d: expected healthy, got %s", i+1, status.Status)
 		}
+	}
+}
+
+// TestGORMHealthChecker_UnderlyingDBError covers the branches where the
+// underlying *sql.DB cannot be retrieved. A gorm.DB with no ConnPool makes
+// DB() fail, which both pingDatabase and checkDatabaseHealth must report.
+func TestGORMHealthChecker_UnderlyingDBError(t *testing.T) {
+	t.Parallel()
+
+	broken := &gorm.DB{Config: &gorm.Config{}}
+	hc := NewGORMHealthChecker(broken, nil)
+	ctx := context.Background()
+
+	if err := hc.pingDatabase(ctx, broken, "write"); err == nil {
+		t.Error("pingDatabase: expected an error when DB() fails")
+	}
+
+	dbHealth := hc.checkDatabaseHealth(ctx, broken, "write")
+	if dbHealth.Connected {
+		t.Error("checkDatabaseHealth: expected Connected=false when DB() fails")
+	}
+
+	if dbHealth.Error == "" {
+		t.Error("checkDatabaseHealth: expected a non-empty error message")
 	}
 }

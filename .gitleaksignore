@@ -1,0 +1,9 @@
+# .gitleaksignore
+#
+# Suppresses known false-positive secret findings so gitleaks runs clean
+# against the default ruleset. Each line is a gitleaks "fingerprint" of the
+# form <commit>:<path>:<rule-id>:<line> (or <path>:<rule-id>:<line> for
+# uncommitted findings).
+#
+# No suppressions are needed yet. Add fake/example credentials from test
+# fixtures or docs here as the foundation sub-packages are extracted.

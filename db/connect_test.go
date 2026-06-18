@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"gorm.io/gorm"
+
 	"github.com/mrz1836/go-foundation/config"
 )
 
@@ -437,4 +439,22 @@ func TestConfigureConnectionPool_DefaultConnMaxLifetime(t *testing.T) {
 	// Stats.MaxLifetimeClosed is available only when conns expire,
 	// but we can at least verify the connection is functional with defaults.
 	_ = time.Minute // silence unused import in case we need it later
+}
+
+// TestConfigureConnectionPool_UnderlyingDBError exercises the error branch where
+// the underlying *sql.DB cannot be obtained. A gorm.DB with no ConnPool makes
+// DB() return gorm.ErrInvalidDB, which configureConnectionPool must surface.
+func TestConfigureConnectionPool_UnderlyingDBError(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.WriteDatabaseConfig{Driver: driverSQLite, Database: ":memory:"}
+
+	err := configureConnectionPool(&gorm.DB{Config: &gorm.Config{}}, cfg)
+	if err == nil {
+		t.Fatal("expected an error when the underlying sql.DB is unavailable")
+	}
+
+	if !errors.Is(err, gorm.ErrInvalidDB) {
+		t.Errorf("error = %v, want it to wrap gorm.ErrInvalidDB", err)
+	}
 }

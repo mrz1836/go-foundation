@@ -176,6 +176,19 @@ func TestMockProvider_SetSecret(t *testing.T) {
 	assert.Equal(t, "new_value", value)
 }
 
+func TestMockProvider_SetSecret_NilMap(t *testing.T) {
+	t.Parallel()
+
+	// A zero-value MockProvider has a nil Secrets map; SetSecret must lazily
+	// initialize it rather than panic.
+	mock := &secrets.MockProvider{}
+	mock.SetSecret("lazy_key", "lazy_value")
+
+	value, err := mock.GetSecret(context.Background(), "lazy_key")
+	require.NoError(t, err)
+	assert.Equal(t, "lazy_value", value)
+}
+
 func TestNewTestSecretsProvider(t *testing.T) {
 	t.Parallel()
 

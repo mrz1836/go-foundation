@@ -5,10 +5,11 @@ package testutil_test
 import (
 	"testing"
 
-	"github.com/mrz1836/go-foundation/models"
-	"github.com/mrz1836/go-foundation/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/mrz1836/go-foundation/models"
+	"github.com/mrz1836/go-foundation/testutil"
 )
 
 // widgetID is a typed string ID, mirroring how consuming bounded contexts

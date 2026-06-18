@@ -4,9 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mrz1836/go-foundation/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/mrz1836/go-foundation/models"
 )
 
 // TestNormalizeEmail covers RFC 5321/5322/6531 syntax (broad punctuation,

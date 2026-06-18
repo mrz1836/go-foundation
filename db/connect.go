@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mrz1836/go-foundation/config"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+
+	"github.com/mrz1836/go-foundation/config"
 )
 
 // Default connection pool settings applied when the config omits them.

@@ -5,8 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mrz1836/go-foundation/models"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/mrz1836/go-foundation/models"
 )
 
 func TestClockFrom_RealClockFallback(t *testing.T) {

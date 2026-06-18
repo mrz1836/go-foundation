@@ -4,9 +4,10 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/mrz1836/go-foundation/observability"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/mrz1836/go-foundation/observability"
 )
 
 func TestInit_ReturnsLoggerAndSetsDefault(t *testing.T) {

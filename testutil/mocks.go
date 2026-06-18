@@ -7,9 +7,10 @@ package testutil
 import (
 	"testing"
 
-	"github.com/mrz1836/go-foundation/config"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+
+	"github.com/mrz1836/go-foundation/config"
 )
 
 // environmentTest is the conventional environment name used by test configs.

@@ -4,9 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/mrz1836/go-foundation/config"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+
+	"github.com/mrz1836/go-foundation/config"
 )
 
 func TestGORMHealthChecker_Check(t *testing.T) {

@@ -7,12 +7,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/mrz1836/go-foundation/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+
+	"github.com/mrz1836/go-foundation/models"
 )
 
 // sampleEdgeID is the typed ID used by the in-test edge model.

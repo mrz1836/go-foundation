@@ -32,7 +32,8 @@ func handlePanic(w http.ResponseWriter, r *http.Request, rec any) {
 
 	reqID := requestID(r)
 
-	slog.Error("panic recovered",
+	slog.Error(
+		"panic recovered",
 		slog.String("type", "panic"),
 		slog.String("request_id", reqID),
 		slog.String("error", fmt.Sprintf("%v", rec)),

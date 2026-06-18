@@ -5,9 +5,10 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/mrz1836/go-foundation/secrets"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/mrz1836/go-foundation/secrets"
 )
 
 var errUnknownKey = errors.New("unknown key")

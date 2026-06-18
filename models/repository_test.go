@@ -5,12 +5,13 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/mrz1836/go-foundation/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+
+	"github.com/mrz1836/go-foundation/models"
 )
 
 // widgetID is a typed string ID over models.BaseModel.
@@ -98,7 +99,8 @@ func TestRepository_QueryOptions(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), count)
 
-	limited, err := repo.FindAll(ctx,
+	limited, err := repo.FindAll(
+		ctx,
 		models.WithOrderBy("name", true),
 		models.WithLimit(2),
 		models.WithOffset(0),

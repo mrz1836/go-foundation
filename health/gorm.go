@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mrz1836/go-foundation/config"
 	"gorm.io/gorm"
+
+	"github.com/mrz1836/go-foundation/config"
 )
 
 // GORMHealthChecker is the GORM-based implementation of HealthChecker.

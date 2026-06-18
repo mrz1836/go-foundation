@@ -3,9 +3,10 @@ package models_test
 import (
 	"testing"
 
-	"github.com/mrz1836/go-foundation/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/mrz1836/go-foundation/models"
 )
 
 func TestValidationError_Error_WithField(t *testing.T) {

@@ -5,12 +5,13 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/mrz1836/go-foundation/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+
+	"github.com/mrz1836/go-foundation/models"
 )
 
 type txRow struct {

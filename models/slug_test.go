@@ -3,8 +3,9 @@ package models_test
 import (
 	"testing"
 
-	"github.com/mrz1836/go-foundation/models"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/mrz1836/go-foundation/models"
 )
 
 func TestGenerateSlug(t *testing.T) {

@@ -101,7 +101,8 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), requestIDContextKey, reqID)
 		r = r.WithContext(ctx)
 
-		slog.Info("Request started",
+		slog.Info(
+			"Request started",
 			slog.String("type", "request"),
 			slog.String("request_id", reqID),
 			slog.String("method", r.Method),

@@ -155,7 +155,7 @@ func extractErrorMessage(body string) string {
 		return ""
 	}
 
-	var m map[string]interface{}
+	var m map[string]any
 	if err := json.Unmarshal([]byte(body), &m); err != nil {
 		return ""
 	}

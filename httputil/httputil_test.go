@@ -121,7 +121,7 @@ func TestWriteErrorOmitsEmptyRequestID(t *testing.T) {
 	}
 
 	// Confirm request_id key is absent from the raw JSON
-	var raw map[string]interface{}
+	var raw map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
 		t.Fatalf("unmarshal raw: %v", err)
 	}

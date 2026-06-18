@@ -124,6 +124,14 @@ func TestNormalizeEmail(t *testing.T) {
 		{name: "trailing dot in domain stripped", input: "jane@example.com.", wantAddr: "jane@example.com", wantRoot: "jane@example.com", wantDomain: "example.com"},
 		{name: "exactly 64-char local accepted", input: oneA64 + "@example.com", wantAddr: oneA64 + "@example.com", wantRoot: oneA64 + "@example.com", wantDomain: "example.com"},
 		{name: "exactly 254-char total accepted", input: addr254, wantAddr: addr254, wantRoot: addr254, wantDomain: addr254Domain},
+
+		// ── M. branch coverage: lone-dot, IDN failures, alias fallback, escapes ─
+		{name: "lone dot is required error", input: ".", wantErr: true},
+		{name: "unquoted invalid IDN domain", input: "user@-.com", wantErr: true},
+		{name: "plus-only local falls back to full root", input: "+tag@example.com", wantAddr: "+tag@example.com", wantRoot: "+tag@example.com", wantDomain: "example.com"},
+		{name: "quoted escaped quote preserved", input: `"a\"b"@example.com`, wantAddr: `"a\"b"@example.com`, wantRoot: `"a\"b"@example.com`, wantDomain: "example.com", wantQuoted: true},
+		{name: "quoted local too long", input: `"` + strings.Repeat("a", 65) + `"@example.com`, wantErr: true},
+		{name: "quoted invalid domain", input: `"abc"@-.com`, wantErr: true},
 	}
 
 	for _, tc := range cases {
@@ -181,6 +189,17 @@ func TestLookupProviderRule(t *testing.T) {
 			assert.Equal(t, tc.wantSeparator, gotRule.Separator, "separator mismatch")
 			assert.Equal(t, tc.wantStripDots, gotRule.StripDots, "StripDots mismatch")
 		})
+	}
+}
+
+// BenchmarkNormalizeEmail measures the contact-dedup hot path. Gmail input
+// exercises the alias rules (plus-tag stripping + dot removal) so the benchmark
+// reflects the most work-heavy provider branch rather than a trivial case.
+func BenchmarkNormalizeEmail(b *testing.B) {
+	b.ReportAllocs()
+
+	for range b.N {
+		_, _ = models.NormalizeEmail("Jane.Doe+newsletter@googlemail.com")
 	}
 }
 

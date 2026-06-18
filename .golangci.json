@@ -43,7 +43,8 @@
     "linters": {
         "disable": [
             "gocritic",
-            "godot"
+            "godot",
+            "wsl_v5"
         ],
         "enable": [
             "asasalint",
@@ -108,7 +109,6 @@
             "unparam",
             "unused",
             "wastedassign",
-            "wsl_v5",
             "zerologlint"
         ],
         "settings": {

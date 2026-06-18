@@ -152,7 +152,7 @@ go install github.com/mrz1836/mage-x/cmd/magex@latest
 <br/>
 
 <details>
-<summary><strong>Repository Features</strong></summary>
+<summary><strong><code>Repository Features</code></strong></summary>
 <br/>
 
 This repository includes 25+ built-in features covering CI/CD, security, code quality, developer experience, and community tooling.
@@ -200,7 +200,7 @@ The system is configured via modular env files in [`.github/env/`](.github/env/R
 </details>
 
 <details>
-<summary><strong>GitHub Workflows</strong></summary>
+<summary><strong><code>GitHub Workflows</code></strong></summary>
 <br/>
 
 All workflows are driven by modular configuration in [`.github/env/`](.github/env/README.md) — no YAML editing required.

@@ -139,7 +139,6 @@ go install github.com/mrz1836/mage-x/cmd/magex@latest
 ## 📚 Documentation
 
 - **API Reference** – Dive into the godocs at [pkg.go.dev/github.com/mrz1836/go-foundation](https://pkg.go.dev/github.com/mrz1836/go-foundation)
-- **Usage Examples** – Browse practical patterns either the [examples directory](examples) or view the [example tests](foundation_test.go)
 - **Benchmarks** – Check the latest numbers in the [benchmark results](#benchmark-results)
 - **Test Suite** – Review both the [unit tests](foundation_test.go) (powered by [`testify`](https://github.com/stretchr/testify))
 

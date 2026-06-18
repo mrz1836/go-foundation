@@ -98,8 +98,8 @@
 
 ## 🧩 About
 
-**go-foundation** is the shared, **domain-agnostic** foundation kit used across mrz1836 Go
-services. It exists to kill drift: instead of every service re-implementing the same
+**go-foundation** is the shared, **domain-agnostic** foundation kit used across several Go
+services and projects. It exists to kill drift: instead of every service re-implementing the same
 configuration, HTTP, persistence, and observability plumbing, that plumbing lives here once
 and is consumed everywhere.
 
@@ -118,12 +118,9 @@ naming. As the kit is assembled it exposes focused sub-packages:
 - **`observability`** — structured logging initialization
 - **`testutil`** — generic test helpers (test database, fixed clock, containers)
 
-Project-specific naming — environment prefixes, database names, health messages, and
-infrastructure constants — intentionally stays in the consuming services, never in this
-module.
+> Project-specific naming — environment prefixes, database names, health messages, and infrastructure constants — intentionally stays in the consuming services, never in this module.
 
-> **Status:** Initial scaffolding. The module currently exposes only its identity; the
-> foundation sub-packages above are added as they are extracted.
+<br/>
 
 ## 📦 Installation
 
@@ -145,9 +142,6 @@ go install github.com/mrz1836/mage-x/cmd/magex@latest
 - **Usage Examples** – Browse practical patterns either the [examples directory](examples) or view the [example tests](foundation_test.go)
 - **Benchmarks** – Check the latest numbers in the [benchmark results](#benchmark-results)
 - **Test Suite** – Review both the [unit tests](foundation_test.go) (powered by [`testify`](https://github.com/stretchr/testify))
-
-> **Good to know:** `go-foundation` ships with *zero* runtime dependencies.
-> The only external package we use is `testify` and `magefile` — and that's strictly for tests and dev.
 
 <br/>
 

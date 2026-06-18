@@ -7,31 +7,58 @@ version: 2
 before:
   hooks:
     - |
-      sh -c '
-        if [ "$SKIP_GORELEASER_TESTS" = "true" ]; then
-          echo "Skipping tests (SKIP_GORELEASER_TESTS=true)"
-        else
-          magex test
-        fi
-      '
+      sh -c "if [ \"${SKIP_GORELEASER_TESTS}\" = \"true\" ]; then
+        echo 'Skipping tests (SKIP_GORELEASER_TESTS=true)'
+      else
+        magex test
+      fi"
 changelog:
+  use: github
   sort: asc
+  abbrev: 0
+  format: '[`{{ slice .SHA 0 7 }}`]({{ .GitURL }}/commit/{{ .SHA }}): {{ .Message }}{{ with .AuthorUsername }} (@{{ . }}){{ end }}'
+  groups:
+    - title: "Features"
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 100
+    - title: "Bug Fixes"
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 200
+    - title: "Documentation"
+      regexp: '^.*?docs?(\([[:word:]]+\))??!?:.+$'
+      order: 300
+    - title: "Refactoring"
+      regexp: '^.*?refactor(\([[:word:]]+\))??!?:.+$'
+      order: 400
+    - title: "Other Changes"
+      order: 9999
   filters:
     exclude:
-      - "^.vscode:"
       - "^test:"
+      - "^Merge pull request"
+      - "^Merge branch"
 
 # ---------------------------
 # Builder
 # ---------------------------
 builds:
-  - env:
+  - id: go-foundation
+    main: ./cmd/go-foundation
+    binary: go-foundation
+    env:
       - CGO_ENABLED=0
     goos:
       - linux
-      - windows
       - darwin
-    skip: true
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.buildDate={{.Date}}
 
 # ---------------------------
 # Archives
@@ -57,6 +84,7 @@ checksum:
 release:
   prerelease: "false"
   name_template: "Release v{{.Version}}"
+  replace_existing_artifacts: true
 
 # ---------------------------
 # Announce

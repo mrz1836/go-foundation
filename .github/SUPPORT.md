@@ -46,7 +46,7 @@ Everything from commit rules to contributor expectations is in [AGENTS.md](./AGE
 ## 📬 Private Contact
 
 For sensitive or non-public concerns, reach out to:
-📧 [go-foundation@mrz1818.com](mailto:go-foundation@mrz1818.com)
+📧 [atlas@mrz1818.com](mailto:atlas@mrz1818.com)
 
 <br/>
 

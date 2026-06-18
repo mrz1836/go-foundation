@@ -1,0 +1,21 @@
+project:
+  name: go-foundation
+  binary: go-foundation
+  module: github.com/mrz1836/go-foundation
+  main: ./cmd/go-foundation/main.go
+
+build:
+  # Custom ldflags with version injection
+  ldflags:
+    - "-s -w"
+    - "-X main.version={{.Version}}"
+    - "-X main.commit={{.Commit}}"
+    - "-X main.buildDate={{.Date}}"
+  flags:
+    - "-trimpath"
+  output: "./cmd/go-foundation"
+
+test:
+  # Match CI timeout configuration (TEST_TIMEOUT_RACE_COVER in .env.base)
+  # Default magex timeout is 10m which was killing tests prematurely
+  timeout: 30m

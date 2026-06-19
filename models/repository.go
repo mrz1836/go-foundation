@@ -19,13 +19,33 @@ import (
 // methods. The active database handle is read from ctx via DBFrom, so a
 // repository call made inside Transactor.WithinTx automatically picks up the
 // transaction.
+//
+// A repository may be configured with a separate read replica (see
+// NewRepositoryWithReadWrite): read methods then target the replica while write
+// methods target the primary. Reads issued inside an active transaction still
+// use the transaction's connection (the primary), preserving read-your-writes
+// consistency. When no replica is configured, reads and writes share one handle.
 type Repository[T any, ID ~string] struct {
-	db *gorm.DB
+	db     *gorm.DB // primary/write connection
+	readDB *gorm.DB // read connection; equals db when no replica is configured
 }
 
-// NewRepository creates a new generic repository instance bound to db.
+// NewRepository creates a new generic repository instance bound to db. Reads and
+// writes share the single connection.
 func NewRepository[T any, ID ~string](db *gorm.DB) *Repository[T, ID] {
-	return &Repository[T, ID]{db: db}
+	return &Repository[T, ID]{db: db, readDB: db}
+}
+
+// NewRepositoryWithReadWrite creates a repository that routes writes to writeDB
+// and reads to readDB (a read replica). Reads made inside an active transaction
+// still use the transaction's connection, so they observe uncommitted writes.
+// A nil readDB falls back to writeDB, making this equivalent to NewRepository.
+func NewRepositoryWithReadWrite[T any, ID ~string](writeDB, readDB *gorm.DB) *Repository[T, ID] {
+	if readDB == nil {
+		readDB = writeDB
+	}
+
+	return &Repository[T, ID]{db: writeDB, readDB: readDB}
 }
 
 // Create inserts a new record into the database.
@@ -46,7 +66,7 @@ func (r *Repository[T, ID]) Find(ctx context.Context, id ID, opts ...QueryOption
 
 	var entity T
 
-	db := ApplyOptions(DBFrom(ctx, r.db).WithContext(ctx), opts...)
+	db := ApplyOptions(DBFrom(ctx, r.readDB).WithContext(ctx), opts...)
 
 	result := db.First(&entity, "id = ?", string(id))
 	if result.Error != nil {
@@ -60,7 +80,7 @@ func (r *Repository[T, ID]) Find(ctx context.Context, id ID, opts ...QueryOption
 func (r *Repository[T, ID]) FindAll(ctx context.Context, opts ...QueryOption) ([]T, error) {
 	var entities []T
 
-	db := ApplyOptions(DBFrom(ctx, r.db).WithContext(ctx), opts...)
+	db := ApplyOptions(DBFrom(ctx, r.readDB).WithContext(ctx), opts...)
 
 	result := db.Find(&entities)
 	if result.Error != nil {
@@ -74,7 +94,7 @@ func (r *Repository[T, ID]) FindAll(ctx context.Context, opts ...QueryOption) ([
 func (r *Repository[T, ID]) FindOne(ctx context.Context, opts ...QueryOption) (*T, error) {
 	var entity T
 
-	db := ApplyOptions(DBFrom(ctx, r.db).WithContext(ctx), opts...)
+	db := ApplyOptions(DBFrom(ctx, r.readDB).WithContext(ctx), opts...)
 
 	result := db.First(&entity)
 	if result.Error != nil {
@@ -164,7 +184,7 @@ func (r *Repository[T, ID]) Count(ctx context.Context, opts ...QueryOption) (int
 		entity T
 	)
 
-	db := ApplyOptions(DBFrom(ctx, r.db).WithContext(ctx).Model(&entity), opts...)
+	db := ApplyOptions(DBFrom(ctx, r.readDB).WithContext(ctx).Model(&entity), opts...)
 
 	result := db.Count(&count)
 	if result.Error != nil {
@@ -185,7 +205,7 @@ func (r *Repository[T, ID]) Exists(ctx context.Context, id ID) (bool, error) {
 		entity T
 	)
 
-	result := DBFrom(ctx, r.db).WithContext(ctx).Model(&entity).Where("id = ?", string(id)).Count(&count)
+	result := DBFrom(ctx, r.readDB).WithContext(ctx).Model(&entity).Where("id = ?", string(id)).Count(&count)
 	if result.Error != nil {
 		return false, WrapDBError(result.Error)
 	}
@@ -193,11 +213,18 @@ func (r *Repository[T, ID]) Exists(ctx context.Context, id ID) (bool, error) {
 	return count > 0, nil
 }
 
-// DB returns the bound database handle. Repositories that need direct GORM
-// access (custom joins, raw SQL) can use this. Prefer DBFrom(ctx, r.DB()) so
-// that an active transaction is picked up.
+// DB returns the bound primary/write database handle. Repositories that need
+// direct GORM access (custom joins, raw SQL) can use this. Prefer
+// DBFrom(ctx, r.DB()) so that an active transaction is picked up.
 func (r *Repository[T, ID]) DB() *gorm.DB {
 	return r.db
+}
+
+// ReadDB returns the read database handle (the read replica when configured,
+// otherwise the primary). Prefer DBFrom(ctx, r.ReadDB()) so that an active
+// transaction is picked up and observes uncommitted writes.
+func (r *Repository[T, ID]) ReadDB() *gorm.DB {
+	return r.readDB
 }
 
 // PostgreSQL SQLSTATE codes (see https://www.postgresql.org/docs/current/errcodes-appendix.html).

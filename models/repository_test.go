@@ -205,3 +205,76 @@ func TestDBFrom_FallsBackWithoutTx(t *testing.T) {
 	ctx := models.WithTx(context.Background(), db)
 	assert.Same(t, db, models.DBFrom(ctx, nil))
 }
+
+func TestRepository_ReadWriteRouting(t *testing.T) {
+	t.Parallel()
+	writeDB := newRepoDB(t)
+	readDB := newRepoDB(t)
+	repo := models.NewRepositoryWithReadWrite[widget, widgetID](writeDB, readDB)
+	ctx := context.Background()
+
+	assert.Same(t, writeDB, repo.DB())
+	assert.Same(t, readDB, repo.ReadDB())
+
+	// Writes target the primary only.
+	w := &widget{Name: "primary-only"}
+	require.NoError(t, repo.Create(ctx, w))
+	require.NoError(t, writeDB.First(&widget{}, "id = ?", string(w.ID)).Error)
+	require.ErrorIs(t, readDB.First(&widget{}, "id = ?", string(w.ID)).Error, gorm.ErrRecordNotFound)
+
+	// Reads target the replica: the primary-only row is invisible to repo reads.
+	_, err := repo.Find(ctx, w.ID)
+	require.ErrorIs(t, err, models.ErrNotFound)
+
+	// A row that exists only on the replica IS visible to repo reads.
+	replicaRow := &widget{Name: "replica-only"}
+	require.NoError(t, readDB.Create(replicaRow).Error)
+
+	got, err := repo.Find(ctx, replicaRow.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "replica-only", got.Name)
+}
+
+func TestRepository_ReadsInsideTxUsePrimary(t *testing.T) {
+	t.Parallel()
+	writeDB := newRepoDB(t)
+	readDB := newRepoDB(t)
+	repo := models.NewRepositoryWithReadWrite[widget, widgetID](writeDB, readDB)
+	tx := models.NewTransactor(writeDB)
+
+	// Inside a transaction, a read must observe the uncommitted write — i.e. it
+	// must use the transaction (primary), not the read replica.
+	require.NoError(t, tx.WithinTx(context.Background(), func(ctx context.Context) error {
+		w := &widget{Name: "in-tx"}
+		if err := repo.Create(ctx, w); err != nil {
+			return err
+		}
+
+		got, err := repo.Find(ctx, w.ID)
+		if err != nil {
+			return err
+		}
+
+		assert.Equal(t, "in-tx", got.Name)
+
+		return nil
+	}))
+}
+
+func TestNewRepositoryWithReadWrite_NilReadFallsBackToWrite(t *testing.T) {
+	t.Parallel()
+	writeDB := newRepoDB(t)
+	repo := models.NewRepositoryWithReadWrite[widget, widgetID](writeDB, nil)
+	ctx := context.Background()
+
+	assert.Same(t, writeDB, repo.DB())
+	assert.Same(t, writeDB, repo.ReadDB())
+
+	// With no replica, reads observe writes immediately (single connection).
+	w := &widget{Name: "single-db"}
+	require.NoError(t, repo.Create(ctx, w))
+
+	got, err := repo.Find(ctx, w.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "single-db", got.Name)
+}

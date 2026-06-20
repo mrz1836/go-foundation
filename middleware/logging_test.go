@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/mrz1836/go-foundation/middleware"
@@ -518,6 +519,71 @@ func TestRecoverMiddleware_PanicReturns500(t *testing.T) {
 
 	if panicEntry.Stack == "" {
 		t.Error("stack should be non-empty")
+	}
+}
+
+func TestLoggingMiddleware_Unwrap(t *testing.T) {
+	// http.NewResponseController.Flush walks the Unwrap chain to reach the
+	// underlying http.Flusher (httptest.ResponseRecorder implements it). A nil
+	// error proves responseWriter.Unwrap returned the inner writer.
+	var flushErr error
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+
+		flushErr = http.NewResponseController(w).Flush()
+	})
+
+	mw := middleware.LoggingMiddleware(handler)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/flush", nil)
+	rr := httptest.NewRecorder()
+
+	captureLogOutput(func() { mw.ServeHTTP(rr, req) })
+
+	if flushErr != nil {
+		t.Errorf("Flush via ResponseController = %v, want nil (Unwrap must expose inner writer)", flushErr)
+	}
+
+	if !rr.Flushed {
+		t.Error("recorder was not flushed; Unwrap did not reach the inner http.Flusher")
+	}
+}
+
+func TestLoggingMiddleware_ErrorBodyTruncated(t *testing.T) {
+	const maxErrorBodySize = 4096
+
+	// A single Write larger than maxErrorBodySize forces the truncation branch
+	// (len(b) > remaining) in responseWriter.Write.
+	bigBody := `{"error":"` + strings.Repeat("x", maxErrorBodySize*2) + `"}`
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(bigBody))
+	})
+
+	mw := middleware.LoggingMiddleware(handler)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/big", nil)
+	rr := httptest.NewRecorder()
+
+	output := captureLogOutput(func() { mw.ServeHTTP(rr, req) })
+
+	// The full body is still written downstream to the client.
+	if rr.Body.Len() != len(bigBody) {
+		t.Errorf("client body length = %d, want %d (downstream write must be intact)", rr.Body.Len(), len(bigBody))
+	}
+
+	// The captured (truncated) body is not valid JSON, so extractErrorMessage
+	// returns "" — confirming only the first 4096 bytes were retained.
+	lines := bytes.Split([]byte(output), []byte("\n"))
+
+	respEntry := parseLogEntry(t, lines[1])
+	if respEntry.Status != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", respEntry.Status)
+	}
+
+	if respEntry.ErrorMessage != "" {
+		t.Errorf("error_message = %q, want empty (truncated body is not valid JSON)", respEntry.ErrorMessage)
 	}
 }
 

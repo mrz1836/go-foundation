@@ -11,6 +11,10 @@ import (
 	"github.com/mrz1836/go-foundation/config"
 )
 
+// errPoolBoom is a package-scope sentinel (keeps err113 happy) used to force the
+// connection-pool configuration failure branch.
+var errPoolBoom = errors.New("pool boom")
+
 func TestNewConnection_SQLite(t *testing.T) {
 	t.Parallel()
 
@@ -456,5 +460,33 @@ func TestConfigureConnectionPool_UnderlyingDBError(t *testing.T) {
 
 	if !errors.Is(err, gorm.ErrInvalidDB) {
 		t.Errorf("error = %v, want it to wrap gorm.ErrInvalidDB", err)
+	}
+}
+
+// TestNewConnection_ConfigurePoolError verifies that NewConnection surfaces an
+// error from connection-pool configuration. With a real dialector db.DB() never
+// fails, so the configurePool indirection is overridden to force the failure and
+// cover the error return in NewConnection.
+func TestNewConnection_ConfigurePoolError(t *testing.T) {
+	// Not parallel: this test swaps the package-level configurePool var.
+	poolErr := errPoolBoom
+
+	original := configurePool
+	configurePool = func(_ *gorm.DB, _ config.DatabaseConfig) error {
+		return poolErr
+	}
+	t.Cleanup(func() { configurePool = original })
+
+	dbName := "test_connect_pool_err.db"
+	cfg := &config.WriteDatabaseConfig{Driver: driverSQLite, Database: dbName}
+	t.Cleanup(func() { _ = os.Remove(dbName) })
+
+	db, err := NewConnection(cfg)
+	if db != nil {
+		t.Error("expected nil db when pool configuration fails")
+	}
+
+	if !errors.Is(err, poolErr) {
+		t.Errorf("error = %v, want it to wrap poolErr", err)
 	}
 }

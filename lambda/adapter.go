@@ -37,6 +37,13 @@ var bufferPool = sync.Pool{
 	},
 }
 
+// marshalJSON is the JSON marshaller used by ServeHTTP for the error response.
+// It is a package-level variable so tests can inject a failure and exercise the
+// otherwise-unreachable static-fallback branch.
+//
+//nolint:gochecknoglobals // injectable seam for testing the marshal-failure fallback
+var marshalJSON = json.Marshal
+
 // lambdaResponseWriter implements http.ResponseWriter and captures the response
 // so it can be converted to an APIGatewayV2HTTPResponse.
 type lambdaResponseWriter struct {
@@ -173,7 +180,7 @@ func ServeHTTP(
 ) (events.APIGatewayV2HTTPResponse, error) {
 	req, err := toHTTPRequest(ctx, event)
 	if err != nil {
-		errResp, marshalErr := json.Marshal(httputil.ErrorResponse{
+		errResp, marshalErr := marshalJSON(httputil.ErrorResponse{
 			Error: constants.ErrorMessageInternalError,
 			Code:  constants.ErrorCodeInternalError,
 		})

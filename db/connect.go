@@ -28,6 +28,12 @@ const (
 
 var errUnsupportedDriver = errors.New("unsupported database driver")
 
+// configurePool indirects configureConnectionPool so tests can inject a failure.
+// With a real dialector the underlying db.DB() never errors, leaving the error
+// return in NewConnection otherwise unreachable. Overriding this var lets a
+// white-box test exercise that branch; production code always uses the default.
+var configurePool = configureConnectionPool //nolint:gochecknoglobals // injectable seam for testing the pool-config failure branch
+
 // NewConnection creates a new GORM database connection based on the configuration.
 // It supports "sqlite" and "postgres" drivers.
 // Accepts any type that implements the DatabaseConfig interface.
@@ -50,7 +56,7 @@ func NewConnection(cfg config.DatabaseConfig) (*gorm.DB, error) {
 	}
 
 	// Configure connection pool
-	if err := configureConnectionPool(db, cfg); err != nil {
+	if err := configurePool(db, cfg); err != nil {
 		return nil, err
 	}
 

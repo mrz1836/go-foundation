@@ -10,6 +10,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 )
 
+// loadAWSConfig indirects config.LoadDefaultConfig so tests can inject a
+// failure. In practice LoadDefaultConfig succeeds offline (it does not validate
+// credentials), leaving the error branch in NewAWSProvider otherwise
+// unreachable. Production code always uses the default; only tests override it.
+var loadAWSConfig = config.LoadDefaultConfig //nolint:gochecknoglobals // injectable seam for testing the config-load failure branch
+
 // AWSProvider reads secrets from AWS Secrets Manager.
 // It fetches a single JSON secret and caches the parsed values in memory.
 // Use this for Lambda/production deployments.
@@ -34,7 +40,7 @@ type AWSProvider struct {
 //	  "api_key": "apikey789"
 //	}
 func NewAWSProvider(ctx context.Context, secretARN string) (*AWSProvider, error) {
-	cfg, err := config.LoadDefaultConfig(ctx)
+	cfg, err := loadAWSConfig(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to load AWS config: %w", ErrAWSSecretsManager, err)
 	}

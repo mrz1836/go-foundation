@@ -3,7 +3,6 @@ package models
 import (
 	"net/mail"
 	"strings"
-	"unicode/utf8"
 
 	"golang.org/x/net/idna"
 	"golang.org/x/text/secure/precis"
@@ -95,7 +94,16 @@ func normalizeUnquoted(trimmed string) (NormalizedEmail, error) {
 		return NormalizedEmail{}, NewValidationError("email", "is not a valid email address")
 	}
 
-	local, domain, ok := splitLocalDomain(parsed.Address)
+	return buildUnquoted(parsed.Address)
+}
+
+// buildUnquoted assembles the canonical and alias-root forms from an
+// already-parsed, RFC-valid unquoted address ("local@domain"). It is split out
+// from normalizeUnquoted so its defensive guards (split failure, invalid
+// domain/local, oversize assembly) can be exercised directly with crafted
+// inputs that the net/mail parse gate would otherwise reject.
+func buildUnquoted(address string) (NormalizedEmail, error) {
+	local, domain, ok := splitLocalDomain(address)
 	if !ok {
 		return NormalizedEmail{}, NewValidationError("email", "is not a valid email address")
 	}
@@ -107,26 +115,26 @@ func normalizeUnquoted(trimmed string) (NormalizedEmail, error) {
 
 	canonical, rule := LookupProviderRule(asciiDomain)
 
+	// splitLocalDomain guarantees a non-empty local, and foldLocal never returns
+	// an empty result without also returning an error (PRECIS rejects runes that
+	// would otherwise map away), so an empty foldedLocal here implies a fold
+	// error, which is reported as an invalid local part.
 	foldedLocal, err := foldLocal(local)
 	if err != nil {
 		return NormalizedEmail{}, NewValidationError("email", "has an invalid local part")
-	}
-
-	if utf8.RuneCountInString(foldedLocal) == 0 {
-		return NormalizedEmail{}, NewValidationError("email", "has an empty local part")
 	}
 
 	if len(foldedLocal) > maxLocalLength {
 		return NormalizedEmail{}, NewValidationError("email", "local part exceeds 64 characters")
 	}
 
-	address := foldedLocal + "@" + canonical
-	if len(address) > maxEmailLength {
+	canonicalAddress := foldedLocal + "@" + canonical
+	if len(canonicalAddress) > maxEmailLength {
 		return NormalizedEmail{}, NewValidationError("email", "exceeds 254 characters")
 	}
 
 	return NormalizedEmail{
-		Address:      address,
+		Address:      canonicalAddress,
 		Root:         aliasRoot(foldedLocal, canonical, rule),
 		Domain:       canonical,
 		DisplayLocal: local,
@@ -142,6 +150,15 @@ func normalizeQuoted(trimmed string) (NormalizedEmail, error) {
 		return NormalizedEmail{}, NewValidationError("email", "is not a valid email address")
 	}
 
+	return buildQuoted(trimmed)
+}
+
+// buildQuoted assembles the canonical form from an already-parsed, RFC-valid
+// quoted address (`"local"@domain`). It is split out from normalizeQuoted so
+// its defensive guards (bad closing-quote position, empty quoted local,
+// oversize assembly) can be exercised directly with crafted inputs that the
+// net/mail parse gate would otherwise reject.
+func buildQuoted(trimmed string) (NormalizedEmail, error) {
 	closeIdx := closingQuoteIndex(trimmed)
 	if closeIdx < 0 || closeIdx+1 >= len(trimmed) || trimmed[closeIdx+1] != '@' {
 		return NormalizedEmail{}, NewValidationError("email", "is not a valid email address")

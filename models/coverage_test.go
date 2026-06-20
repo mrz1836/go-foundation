@@ -3,6 +3,7 @@ package models_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -23,6 +24,9 @@ var (
 	errPgFKText         = errors.New(`insert violates foreign key constraint "x"`)
 	errRandomText       = errors.New("some random failure")
 	errHookFailed       = errors.New("hook failed")
+	// errWrappedValidation wraps ErrValidation without being a *ValidationError,
+	// exercising the errors.Is(err, ErrValidation) fallback in wrapValidationError.
+	errWrappedValidation = fmt.Errorf("config rejected: %w", models.ErrValidation)
 )
 
 func TestWrapDBError(t *testing.T) {
@@ -39,6 +43,11 @@ func TestWrapDBError(t *testing.T) {
 		{
 			name:   "validation error preserved",
 			err:    models.NewValidationError("field", "bad"),
+			target: models.ErrValidation,
+		},
+		{
+			name:   "wrapped ErrValidation preserved",
+			err:    errWrappedValidation,
 			target: models.ErrValidation,
 		},
 		{

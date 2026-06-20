@@ -5,6 +5,11 @@
 // gated behind the "integration" build tag so unit-test runs stay fast and
 // dependency-free.
 //
+// The branchy setup/reset/skip LOGIC lives in postgres_logic.go (untagged, unit
+// tested with a fake executor). This file holds only the heavy, I/O-bound glue:
+// booting a testcontainers Postgres, wiring the real seams into that logic, and
+// the *testing.T entry points.
+//
 // This module ships no schema of its own: callers AutoMigrate the models they
 // exercise. NewPostgresTestDB returns a shared, truncated-between-tests handle;
 // NewPostgresIsolatedDB returns a private schema safe for t.Parallel.
@@ -14,7 +19,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -26,10 +30,6 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-// TestDatabaseURLEnv is the env var that, when set, points the harness at an
-// already-running PostgreSQL instance instead of booting a container.
-const TestDatabaseURLEnv = "FOUNDATION_TEST_DATABASE_URL"
-
 // postgresImage is the PostgreSQL image booted when no DSN is supplied.
 const postgresImage = "postgres:17-alpine"
 
@@ -40,11 +40,8 @@ const containerBootTimeout = 60 * time.Second
 // created once under pgOnce and reused by every NewPostgresTestDB call; the
 // container is reaped at process exit by the testcontainers Ryuk reaper.
 var (
-	pgOnce sync.Once //nolint:gochecknoglobals // one resource per test binary
-	pgDB   *gorm.DB  //nolint:gochecknoglobals // shared test database handle
-	pgDSN  string    //nolint:gochecknoglobals // resolved DSN, reused by isolated schemas
-	pgErr  error     //nolint:gochecknoglobals,errname // mutable setup-failure state, not a sentinel
-	pgSkip string    //nolint:gochecknoglobals // non-empty => skip reason
+	pgOnce  sync.Once     //nolint:gochecknoglobals // one resource per test binary
+	pgSetup postgresSetup //nolint:gochecknoglobals // resolved shared-database state
 )
 
 // NewPostgresTestDB returns a *gorm.DB bound to a shared PostgreSQL database.
@@ -62,62 +59,27 @@ func NewPostgresTestDB(t *testing.T) *gorm.DB {
 
 	pgOnce.Do(initPostgresTestDB)
 
-	if pgSkip != "" {
-		t.Skip(pgSkip)
+	if pgSetup.skip != "" {
+		t.Skip(pgSetup.skip)
 	}
 
-	if pgErr != nil {
-		t.Fatalf("postgres test database unavailable: %v", pgErr)
+	if pgSetup.err != nil {
+		t.Fatalf("postgres test database unavailable: %v", pgSetup.err)
 	}
 
-	truncateAllTables(t, pgDB)
+	truncateAllTables(t, pgSetup.db)
 
-	return pgDB
+	return pgSetup.db
 }
 
-// initPostgresTestDB establishes the shared database once: it connects to a
-// supplied DSN or boots a container and resets the public schema. It records a
-// skip reason instead of an error when no runtime is available.
+// initPostgresTestDB establishes the shared database once by driving
+// setupPostgres with the real environment, container booter, and gorm opener.
 func initPostgresTestDB() {
-	ctx := context.Background()
-
-	dsn := os.Getenv(TestDatabaseURLEnv)
-	if dsn == "" {
-		bootedDSN, skip, err := bootPostgresContainer(ctx)
-		switch {
-		case skip != "":
-			pgSkip = skip
-			return
-		case err != nil:
-			pgErr = err
-			return
-		}
-
-		dsn = bootedDSN
-	}
-
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Silent),
+	pgSetup = setupPostgres(context.Background(), postgresDeps{
+		getenv: os.Getenv,
+		boot:   bootPostgresContainer,
+		open:   openPostgres,
 	})
-	if err != nil {
-		pgErr = fmt.Errorf("connect to the Postgres test database: %w", err)
-		return
-	}
-
-	// Reset the public schema so each run starts clean whether the target is a
-	// fresh container or a reused DSN that already carries a schema.
-	if err = db.Exec(`DROP SCHEMA IF EXISTS public CASCADE`).Error; err != nil {
-		pgErr = fmt.Errorf("reset public schema: %w", err)
-		return
-	}
-
-	if err = db.Exec(`CREATE SCHEMA public`).Error; err != nil {
-		pgErr = fmt.Errorf("recreate public schema: %w", err)
-		return
-	}
-
-	pgDB = db
-	pgDSN = dsn
 }
 
 // pgIsolatedSeq disambiguates schema names across parallel calls within the
@@ -134,16 +96,12 @@ func NewPostgresIsolatedDB(t *testing.T) *gorm.DB {
 	// Reuse NewPostgresTestDB's once-init (skip/fatal handling, resolved DSN).
 	base := NewPostgresTestDB(t)
 
-	name := fmt.Sprintf("t_%d_%d", time.Now().UnixNano(), pgIsolatedSeq.Add(1))
-	if err := base.Exec(`DROP SCHEMA IF EXISTS ` + name + ` CASCADE`).Error; err != nil {
-		t.Fatalf("drop schema %s: %v", name, err)
+	name := isolatedSchemaName(time.Now().UnixNano(), pgIsolatedSeq.Add(1))
+	if err := createIsolatedSchema(gormExecutor{db: base}, name); err != nil {
+		t.Fatalf("create isolated schema: %v", err)
 	}
 
-	if err := base.Exec(`CREATE SCHEMA ` + name).Error; err != nil {
-		t.Fatalf("create schema %s: %v", name, err)
-	}
-
-	db, err := gorm.Open(postgres.Open(withSearchPath(pgDSN, name)), &gorm.Config{
+	db, err := gorm.Open(postgres.Open(withSearchPath(pgSetup.dsn, name)), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
@@ -161,16 +119,26 @@ func NewPostgresIsolatedDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-// withSearchPath appends a search_path runtime parameter to a Postgres URL DSN
-// so every connection on the resulting pool resolves unqualified names to the
-// given schema first.
-func withSearchPath(dsn, schemaName string) string {
-	sep := "?"
-	if strings.Contains(dsn, "?") {
-		sep = "&"
+// truncateAllTables empties every public table, failing the test on error.
+func truncateAllTables(t *testing.T, db *gorm.DB) {
+	t.Helper()
+
+	if err := truncatePublicTables(gormExecutor{db: db}); err != nil {
+		t.Fatalf("%v", err)
+	}
+}
+
+// openPostgres connects to the given DSN with a silent logger and returns the
+// handle plus its executor. It is the production seam for postgresDeps.open.
+func openPostgres(dsn string) (*gorm.DB, pgExecutor, error) {
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		return nil, nil, err
 	}
 
-	return dsn + sep + "search_path=" + schemaName
+	return db, gormExecutor{db: db}, nil
 }
 
 // bootPostgresContainer starts a PostgreSQL container and returns its DSN. When
@@ -207,52 +175,4 @@ func bootPostgresContainer(ctx context.Context) (dsn, skip string, err error) {
 	}
 
 	return connStr, "", nil
-}
-
-// isContainerRuntimeUnavailable reports whether err indicates that no Docker /
-// container runtime is reachable, as opposed to a genuine boot failure.
-func isContainerRuntimeUnavailable(err error) bool {
-	msg := strings.ToLower(err.Error())
-	for _, sig := range []string{
-		"cannot connect to the docker daemon",
-		"docker daemon is not running",
-		"failed to find any matching",
-		"rootless docker not found",
-		"docker: command not found",
-		"no such file or directory",
-		"connection refused",
-	} {
-		if strings.Contains(msg, sig) {
-			return true
-		}
-	}
-
-	return false
-}
-
-// truncateAllTables empties every public table, resetting identity sequences,
-// so each test starts from a clean slate. A schema with no tables is a no-op.
-func truncateAllTables(t *testing.T, db *gorm.DB) {
-	t.Helper()
-
-	var tables []string
-	if err := db.Raw(
-		`SELECT tablename FROM pg_tables WHERE schemaname = 'public'`,
-	).Scan(&tables).Error; err != nil {
-		t.Fatalf("list public tables: %v", err)
-	}
-
-	if len(tables) == 0 {
-		return
-	}
-
-	quoted := make([]string, len(tables))
-	for i, name := range tables {
-		quoted[i] = `"` + name + `"`
-	}
-
-	stmt := `TRUNCATE ` + strings.Join(quoted, ", ") + ` RESTART IDENTITY CASCADE`
-	if err := db.Exec(stmt).Error; err != nil {
-		t.Fatalf("truncate tables: %v", err)
-	}
 }

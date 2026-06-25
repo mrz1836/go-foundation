@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
 	"github.com/mrz1836/go-foundation/config"

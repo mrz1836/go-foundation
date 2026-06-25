@@ -7,13 +7,32 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
-	sqlite3 "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
 	"github.com/mrz1836/go-foundation/models"
 )
+
+// SQLite extended result codes used to drive the WrapDBError matcher in tests.
+const (
+	sqliteCodeUnique     = 2067 // SQLITE_CONSTRAINT_UNIQUE
+	sqliteCodePrimaryKey = 1555 // SQLITE_CONSTRAINT_PRIMARYKEY
+	sqliteCodeForeignKey = 787  // SQLITE_CONSTRAINT_FOREIGNKEY
+	sqliteCodeGeneric    = 1    // SQLITE_ERROR
+)
+
+// sqliteCodeError is a stand-in for the pure-Go SQLite driver's error type,
+// which exposes the extended result code via Code() int. WrapDBError matches
+// that behavior structurally, so this fake exercises the matcher without a real
+// database or any driver import.
+type sqliteCodeError struct {
+	code int
+	msg  string
+}
+
+func (e sqliteCodeError) Error() string { return e.msg }
+func (e sqliteCodeError) Code() int     { return e.code }
 
 // Static error fixtures used as WrapDBError inputs and hook failures. Declaring
 // them at package scope keeps err113 happy (no dynamic errors.New in funcs).
@@ -67,22 +86,22 @@ func TestWrapDBError(t *testing.T) {
 		},
 		{
 			name:   "sqlite unique violation",
-			err:    sqlite3.Error{Code: sqlite3.ErrConstraint, ExtendedCode: sqlite3.ErrConstraintUnique},
+			err:    sqliteCodeError{code: sqliteCodeUnique, msg: "UNIQUE constraint failed"},
 			target: models.ErrDuplicateKey,
 		},
 		{
 			name:   "sqlite primary key violation",
-			err:    sqlite3.Error{Code: sqlite3.ErrConstraint, ExtendedCode: sqlite3.ErrConstraintPrimaryKey},
+			err:    sqliteCodeError{code: sqliteCodePrimaryKey, msg: "PRIMARY KEY constraint failed"},
 			target: models.ErrDuplicateKey,
 		},
 		{
 			name:   "sqlite foreign key violation",
-			err:    sqlite3.Error{Code: sqlite3.ErrConstraint, ExtendedCode: sqlite3.ErrConstraintForeignKey},
+			err:    sqliteCodeError{code: sqliteCodeForeignKey, msg: "FOREIGN KEY constraint failed"},
 			target: models.ErrForeignKey,
 		},
 		{
 			name:   "sqlite other constraint",
-			err:    sqlite3.Error{Code: sqlite3.ErrError},
+			err:    sqliteCodeError{code: sqliteCodeGeneric, msg: "generic error"},
 			target: models.ErrDatabaseError,
 		},
 		{

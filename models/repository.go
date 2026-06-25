@@ -9,9 +9,25 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/mattn/go-sqlite3"
 	"gorm.io/gorm"
 )
+
+// SQLite extended result codes for constraint violations. They are declared
+// locally — rather than imported from a driver package — because these three
+// values are part of the stable SQLite ABI. Keeping them here lets the matcher
+// stay driver-agnostic (see sqliteCoder).
+const (
+	sqliteConstraintPrimaryKey = 1555 // SQLITE_CONSTRAINT_PRIMARYKEY
+	sqliteConstraintUnique     = 2067 // SQLITE_CONSTRAINT_UNIQUE
+	sqliteConstraintForeignKey = 787  // SQLITE_CONSTRAINT_FOREIGNKEY
+)
+
+// sqliteCoder is the error behavior exposed by the pure-Go SQLite drivers
+// (modernc.org/sqlite and its glebarez/go-sqlite fork): the extended result code
+// via Code() int. Matching the behavior rather than a concrete type keeps this
+// package free of any SQLite driver import — so it builds without cgo and stays
+// decoupled from the test database choice.
+type sqliteCoder interface{ Code() int }
 
 // Repository provides generic CRUD operations for models. It is doubly
 // generic — over the entity type T and over the entity's typed ID — so
@@ -295,21 +311,26 @@ func wrapPgError(err error) (bool, error) {
 	return true, fmt.Errorf("%w: %s", ErrDatabaseError, pgErr.Message)
 }
 
-// wrapSqliteError matches SQLite errors via mattn/go-sqlite3 extended codes.
+// wrapSqliteError matches SQLite errors by their extended result code, exposed
+// by the pure-Go driver through the sqliteCoder behavior. Because the driver is
+// pure Go, this compiles and runs without cgo: the production build
+// (CGO_ENABLED=0, e.g. a static Lambda) and the test build share one code path.
+// SQLite is a development/test database; production uses PostgreSQL (pgx), whose
+// errors are matched earlier by wrapPgError.
 func wrapSqliteError(err error) (bool, error) {
-	var sqliteErr sqlite3.Error
-	if !errors.As(err, &sqliteErr) {
+	var coder sqliteCoder
+	if !errors.As(err, &coder) {
 		return false, nil
 	}
 
-	switch sqliteErr.ExtendedCode {
-	case sqlite3.ErrConstraintUnique, sqlite3.ErrConstraintPrimaryKey:
-		return true, fmt.Errorf("%w: %s", ErrDuplicateKey, sqliteErr.Error())
-	case sqlite3.ErrConstraintForeignKey:
-		return true, fmt.Errorf("%w: %s", ErrForeignKey, sqliteErr.Error())
+	switch coder.Code() {
+	case sqliteConstraintUnique, sqliteConstraintPrimaryKey:
+		return true, fmt.Errorf("%w: %s", ErrDuplicateKey, err.Error())
+	case sqliteConstraintForeignKey:
+		return true, fmt.Errorf("%w: %s", ErrForeignKey, err.Error())
 	}
 
-	return true, fmt.Errorf("%w: %s", ErrDatabaseError, sqliteErr.Error())
+	return true, fmt.Errorf("%w: %s", ErrDatabaseError, err.Error())
 }
 
 // wrapByMessage is a defensive fallback for unwrapped driver errors. The

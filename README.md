@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🚀&nbsp;&nbsp;go-foundation
+# 📦&nbsp;&nbsp;go-foundation
 
 **The shared, domain-agnostic foundation kit for modern Go services**
 

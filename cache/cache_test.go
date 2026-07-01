@@ -17,6 +17,11 @@ import (
 // Test fixtures: a generic item, a mock loader, and an equality match function
 // ============================================================================
 
+// errLoaderFailed is a static sentinel returned by the mock loader in the
+// loader-error test. Declaring it at package scope keeps err113 happy (no
+// dynamic errors.New inside a test function).
+var errLoaderFailed = errors.New("loader connection failed")
+
 // testItem is a minimal record used to exercise the generic cache mechanics.
 // The equality match function compares against its secret field, so the tests
 // never need a real hashing dependency.
@@ -189,7 +194,7 @@ func TestCache_ValidKey_FirstCall(t *testing.T) {
 	t.Parallel()
 
 	loader := newMockLoader()
-	secret := "valid-key-fixture"
+	secret := "valid-key-fixture" //nolint:gosec // G101: test fixture, not a real credential
 	loader.addKey(secret, true)
 
 	c := New(loader, matchEqual)
@@ -254,7 +259,7 @@ func TestCache_TTLExpiration_ValidKey(t *testing.T) {
 	t.Parallel()
 
 	loader := newMockLoader()
-	secret := "test_ttlexpire12345678901234"
+	secret := "test_ttlexpire12345678901234" //nolint:gosec // G101: test fixture, not a real credential
 	loader.addKey(secret, true)
 
 	clock := newTestClock(time.Now())
@@ -346,8 +351,8 @@ func TestCache_InvalidateKey(t *testing.T) {
 	t.Parallel()
 
 	loader := newMockLoader()
-	secret1 := "cache-key-one"
-	secret2 := "cache-key-two"
+	secret1 := "cache-key-one" //nolint:gosec // G101: test fixture, not a real credential
+	secret2 := "cache-key-two" //nolint:gosec // G101: test fixture, not a real credential
 	loader.addKey(secret1, true)
 	loader.addKey(secret2, true)
 
@@ -407,10 +412,8 @@ func TestCache_Stats(t *testing.T) {
 func TestCache_LoaderError(t *testing.T) {
 	t.Parallel()
 
-	loaderErr := errors.New("loader connection failed")
-
 	loader := newMockLoader()
-	loader.setError(loaderErr)
+	loader.setError(errLoaderFailed)
 
 	c := New(loader, matchEqual)
 	ctx := context.Background()
@@ -419,7 +422,7 @@ func TestCache_LoaderError(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Nil(t, result)
-	assert.ErrorIs(t, err, loaderErr)
+	assert.ErrorIs(t, err, errLoaderFailed)
 }
 
 func TestCache_InactiveKey_NotReturned(t *testing.T) {
@@ -679,7 +682,7 @@ func TestCache_MaxEntriesEviction_RemovesOldestWhenNoneExpired(t *testing.T) {
 	}
 	c.mu.Unlock()
 
-	assert.Equal(t, maxEntries, len(c.entries))
+	assert.Len(t, c.entries, maxEntries)
 
 	// Add one more entry - should trigger the oldest-entries eviction branch.
 	_, _ = c.Validate(ctx, "test_triggeroldest12345678")

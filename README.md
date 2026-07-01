@@ -111,6 +111,7 @@ naming. As the kit is assembled it exposes focused sub-packages:
 - **`middleware`** — logging, recovery, and request-ID HTTP middleware
 - **`httputil`** — JSON response and error helpers
 - **`pagination`** — cursor-based list pagination
+- **`cache`** — generic two-tier TTL cache for validating opaque secrets (bounded, DoS-guarded, injectable clock)
 - **`recurrence`** — DST-correct next-occurrence calculator for weekly recurring event patterns
 - **`models`** — generic `BaseModel`, `Repository`, `Clock`, and transaction helpers
 - **`secrets`** — pluggable secret providers (env, AWS, mock)

@@ -11,22 +11,19 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/mrz1836/go-foundation/ctxutil"
 )
 
 const maxErrorBodySize = 4096 // Keep at most 4KB of error response
 
-type contextKey string
-
-const requestIDContextKey contextKey = "request_id"
-
 // RequestIDFromContext extracts the request ID from the context.
 // Returns an empty string if no request ID is present.
+//
+// Deprecated: use ctxutil.RequestIDFrom. Retained for backward compatibility;
+// it now reads the same ctxutil key.
 func RequestIDFromContext(ctx context.Context) string {
-	if id, ok := ctx.Value(requestIDContextKey).(string); ok {
-		return id
-	}
-
-	return ""
+	return ctxutil.RequestIDFrom(ctx)
 }
 
 // requestID extracts the request ID from the request headers.
@@ -98,7 +95,7 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 		reqID := requestID(r)
 
 		// Store request ID in context for downstream handlers.
-		ctx := context.WithValue(r.Context(), requestIDContextKey, reqID)
+		ctx := ctxutil.WithRequestID(r.Context(), reqID)
 		r = r.WithContext(ctx)
 
 		slog.Info(

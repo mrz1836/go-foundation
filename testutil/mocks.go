@@ -23,6 +23,8 @@ func NewTestDB(t testing.TB) *gorm.DB {
 
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
+		// Defensive guard: opening an in-memory SQLite database does not fail in
+		// practice, so this branch is intentionally left uncovered by tests.
 		t.Fatalf("failed to create test db: %v", err)
 	}
 

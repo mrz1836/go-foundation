@@ -757,6 +757,71 @@ func TestCache_RemoveOldestEntries_DynamicPercentage(t *testing.T) {
 	}
 }
 
+// TestCache_ValidateAndCache_DoubleCheckAfterLock exercises the double-check
+// guard inside validateAndCache. When another goroutine has already stored a
+// fresh entry for the same key between the fast-path RUnlock and acquiring the
+// write lock, validateAndCache must return that cached result directly without
+// touching the loader. This test package is white-box (package cache), so the
+// branch is driven deterministically by pre-seeding c.entries and invoking the
+// unexported method — no racing goroutines, no flaky timing.
+func TestCache_ValidateAndCache_DoubleCheckAfterLock(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		valid bool
+	}{
+		{name: "valid entry returned from double-check", valid: true},
+		{name: "invalid entry returned from double-check", valid: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			loader := newMockLoader()
+			c := New(loader, matchEqual)
+			ctx := context.Background()
+
+			secret := "test_doublecheck12345678901"
+			cacheKey := hashKey(secret)
+			now := time.Now()
+			item := testItem{id: "seeded-id", secret: secret}
+
+			// Simulate a concurrent goroutine having already cached a fresh
+			// result for this key before we take the write lock. A long TTL
+			// guarantees the entry is not expired at `now`.
+			c.mu.Lock()
+			seeded := &entry[testItem]{
+				valid:     tt.valid,
+				checkedAt: now,
+				ttl:       time.Hour,
+			}
+			if tt.valid {
+				seeded.item = &item
+			}
+			c.entries[cacheKey] = seeded
+			c.mu.Unlock()
+
+			// loadedValid=true so no refresh would be attempted even if the
+			// double-check were skipped; the getCallCount assertion below proves
+			// the method short-circuited on the fresh entry instead.
+			result, err := c.validateAndCache(ctx, secret, cacheKey, true, now)
+
+			require.NoError(t, err)
+			assert.Equal(t, int64(0), loader.getCallCount(),
+				"double-check should return the cached entry without loading")
+
+			if tt.valid {
+				require.NotNil(t, result)
+				assert.Equal(t, &item, result, "should return the seeded item pointer")
+			} else {
+				assert.Nil(t, result, "invalid entry should return a nil item")
+			}
+		})
+	}
+}
+
 // ============================================================================
 // Benchmark Tests
 // ============================================================================

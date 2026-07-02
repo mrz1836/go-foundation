@@ -53,10 +53,7 @@ func TestRequestIDToMetadata(t *testing.T) {
 			if len(out) == 0 {
 				t.Fatal("RequestIDToMetadata returned an empty blob; want non-empty")
 			}
-			var decoded map[string]any
-			if err := json.Unmarshal(out, &decoded); err != nil {
-				t.Fatalf("RequestIDToMetadata produced invalid JSON %q: %v", out, err)
-			}
+			decoded := decodeMetadata(t, out)
 
 			// The id round-trips through the extractor.
 			if got := ctxutil.RequestIDFromMetadata(out); got != tt.wantRequestID {
@@ -65,18 +62,44 @@ func TestRequestIDToMetadata(t *testing.T) {
 
 			// An empty id must not stamp the key at all.
 			if tt.requestID == "" {
-				if _, present := decoded["request_id"]; present {
-					t.Fatalf("request_id key present for empty id: %q", out)
-				}
+				assertKeyAbsent(t, decoded, "request_id", out)
 			}
 
 			// Extra base keys survive the merge.
-			for k, want := range tt.wantExtra {
-				if got, _ := decoded[k].(string); got != want {
-					t.Fatalf("merged key %q = %v, want %q", k, decoded[k], want)
-				}
-			}
+			assertExtraKeys(t, decoded, tt.wantExtra)
 		})
+	}
+}
+
+// decodeMetadata unmarshals a metadata blob, failing the test on invalid JSON.
+func decodeMetadata(t *testing.T, out []byte) map[string]any {
+	t.Helper()
+
+	var decoded map[string]any
+	if err := json.Unmarshal(out, &decoded); err != nil {
+		t.Fatalf("RequestIDToMetadata produced invalid JSON %q: %v", out, err)
+	}
+
+	return decoded
+}
+
+// assertKeyAbsent fails the test if key is present in decoded.
+func assertKeyAbsent(t *testing.T, decoded map[string]any, key string, out []byte) {
+	t.Helper()
+
+	if _, present := decoded[key]; present {
+		t.Fatalf("%s key present for empty id: %q", key, out)
+	}
+}
+
+// assertExtraKeys verifies that each want key survives the merge with its value.
+func assertExtraKeys(t *testing.T, decoded map[string]any, want map[string]string) {
+	t.Helper()
+
+	for k, wantVal := range want {
+		if got, _ := decoded[k].(string); got != wantVal {
+			t.Fatalf("merged key %q = %v, want %q", k, decoded[k], wantVal)
+		}
 	}
 }
 

@@ -109,6 +109,7 @@ naming. As the kit is assembled it exposes focused sub-packages:
 - **`config`** — application, database, logging, and AWS configuration types
 - **`lambda`** — AWS Lambda (API Gateway v2) ⇄ `net/http` adapter
 - **`middleware`** — logging, recovery, and request-ID HTTP middleware
+- **`ctxutil`** — request-ID context propagation helpers
 - **`httputil`** — JSON response and error helpers
 - **`pagination`** — cursor-based list pagination
 - **`cache`** — generic two-tier TTL cache for validating opaque secrets (bounded, DoS-guarded, injectable clock)

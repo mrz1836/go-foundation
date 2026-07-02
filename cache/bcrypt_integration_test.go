@@ -7,10 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mrz1836/go-foundation/cache"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/mrz1836/go-foundation/cache"
 )
 
 // apiKey mirrors the credential record a real authorizer caches: an identifier,

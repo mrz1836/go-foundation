@@ -1,6 +1,6 @@
 //go:build integration
 
-package testutil_test
+package pgtest_test
 
 import (
 	"testing"
@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mrz1836/go-foundation/models"
-	"github.com/mrz1836/go-foundation/testutil"
+	"github.com/mrz1836/go-foundation/testutil/pgtest"
 )
 
 // widgetID is a typed string ID, mirroring how consuming bounded contexts
@@ -28,7 +28,7 @@ type widget struct {
 // UUID v7 BeforeCreate hook, and timestamp handling all work against PostgreSQL
 // (the production driver), complementing the SQLite-based unit tests.
 func TestRepository_PostgresRoundTrip(t *testing.T) {
-	db := testutil.NewPostgresIsolatedDB(t)
+	db := pgtest.NewPostgresIsolatedDB(t)
 	require.NoError(t, db.AutoMigrate(&widget{}))
 
 	repo := models.NewRepository[widget, widgetID](db)

@@ -1,9 +1,14 @@
-// Package testutil's PostgreSQL harness logic lives here, deliberately WITHOUT
-// the "integration" build tag, so the branchy setup/reset/skip logic is unit
-// testable with a fake executor and injected seams — no container or live
-// database required. The heavy, testcontainers-backed wiring that drives this
-// logic stays in postgres.go behind the "integration" tag.
-package testutil
+// Package pgtest provides a testcontainers-backed PostgreSQL harness for
+// integration tests built on go-foundation. It boots (or connects to) a real
+// PostgreSQL instance behind the "integration" build tag, so ordinary unit-test
+// runs stay fast and free of the container/docker dependency — importing this
+// package's parent, testutil, does not pull testcontainers.
+//
+// This file carries the branchy setup/reset/skip logic, deliberately WITHOUT the
+// build tag, so it is unit testable with a fake executor and injected seams — no
+// container or live database required. The heavy, testcontainers-backed wiring
+// that drives this logic lives in postgres.go behind the tag.
+package pgtest
 
 import (
 	"context"

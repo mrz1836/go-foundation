@@ -1,19 +1,13 @@
 //go:build integration
 
-// Package testutil's PostgreSQL harness boots (or connects to) a real
-// PostgreSQL instance for integration tests. Unlike the SQLite helpers it is
-// gated behind the "integration" build tag so unit-test runs stay fast and
-// dependency-free.
-//
-// The branchy setup/reset/skip LOGIC lives in postgres_logic.go (untagged, unit
-// tested with a fake executor). This file holds only the heavy, I/O-bound glue:
-// booting a testcontainers Postgres, wiring the real seams into that logic, and
-// the *testing.T entry points.
-//
-// This module ships no schema of its own: callers AutoMigrate the models they
-// exercise. NewPostgresTestDB returns a shared, truncated-between-tests handle;
-// NewPostgresIsolatedDB returns a private schema safe for t.Parallel.
-package testutil
+// This file holds the heavy, I/O-bound glue of the PostgreSQL harness: booting a
+// testcontainers Postgres, wiring the real seams into the setup/reset/skip logic
+// in postgres_logic.go, and the *testing.T entry points. It ships no schema of
+// its own: callers AutoMigrate the models they exercise. NewPostgresTestDB
+// returns a shared, truncated-between-tests handle; NewPostgresIsolatedDB returns
+// a private schema safe for t.Parallel.
+
+package pgtest
 
 import (
 	"context"

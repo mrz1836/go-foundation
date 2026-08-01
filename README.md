@@ -119,7 +119,7 @@ naming. As the kit is assembled it exposes focused sub-packages:
 - **`db`** — database connection helpers
 - **`health`** — health-check helpers
 - **`observability`** — structured logging initialization
-- **`testutil`** — generic test helpers (test database, fixed clock, containers, HTTP doer double, log recorder, free port)
+- **`testutil`** — dependency-light generic test helpers (in-memory test database, test config, HTTP doer double, log recorder, free port); the testcontainers-backed PostgreSQL harness lives in the `testutil/pgtest` subpackage
 
 > Project-specific naming — environment prefixes, database names, health messages, and infrastructure constants — intentionally stays in the consuming services, never in this module.
 

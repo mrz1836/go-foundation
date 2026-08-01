@@ -1,7 +1,11 @@
 // Package testutil provides generic, domain-agnostic test helpers for services
 // built on go-foundation: in-memory SQLite databases, ready-made test
-// configurations, and (behind the "integration" build tag) a PostgreSQL
-// testcontainers harness.
+// configurations, a programmable HTTP doer double, a log-recording slog handler,
+// and a free-port helper. All are dependency-light — stdlib plus gorm/sqlite.
+//
+// The heavier, testcontainers-backed PostgreSQL harness lives in the
+// testutil/pgtest subpackage, so importing testutil does not pull the container
+// runtime into a consumer's module graph.
 package testutil
 
 import (

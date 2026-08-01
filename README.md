@@ -113,12 +113,13 @@ naming. As the kit is assembled it exposes focused sub-packages:
 - **`pagination`** — cursor-based list pagination
 - **`cache`** — generic two-tier TTL cache for validating opaque secrets (bounded, DoS-guarded, injectable clock)
 - **`recurrence`** — DST-correct next-occurrence calculator for weekly recurring event patterns
+- **`backoff`** — exponential retry-delay ladder (base, doubling, capped)
 - **`models`** — generic `BaseModel`, `Repository`, `Clock`, and transaction helpers
 - **`secrets`** — pluggable secret providers (env, AWS, mock)
 - **`db`** — database connection helpers
 - **`health`** — health-check helpers
 - **`observability`** — structured logging initialization
-- **`testutil`** — generic test helpers (test database, fixed clock, containers)
+- **`testutil`** — generic test helpers (test database, fixed clock, containers, HTTP doer double, log recorder, free port)
 
 > Project-specific naming — environment prefixes, database names, health messages, and infrastructure constants — intentionally stays in the consuming services, never in this module.
 

@@ -11,6 +11,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/mrz1836/go-foundation/testutil"
 )
 
 // ============================================================================
@@ -96,38 +98,6 @@ func (m *mockLoader) resetCallCount() {
 }
 
 // ============================================================================
-// Test Time Controller
-// ============================================================================
-
-// testClock provides a controllable clock for testing.
-type testClock struct {
-	mu      sync.RWMutex
-	current time.Time
-}
-
-func newTestClock(start time.Time) *testClock {
-	return &testClock{current: start}
-}
-
-func (c *testClock) Now() time.Time {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.current
-}
-
-func (c *testClock) Advance(d time.Duration) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.current = c.current.Add(d)
-}
-
-func (c *testClock) Set(t time.Time) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.current = t
-}
-
-// ============================================================================
 // Constructor / option Tests
 // ============================================================================
 
@@ -177,7 +147,7 @@ func TestNew_WithNowFunc(t *testing.T) {
 	t.Parallel()
 
 	loader := newMockLoader()
-	clock := newTestClock(time.Now())
+	clock := testutil.NewFakeClock(time.Now())
 	c := New(loader, matchEqual, WithNowFunc(clock.Now))
 
 	// Verify the custom now function is used.
@@ -262,7 +232,7 @@ func TestCache_TTLExpiration_ValidKey(t *testing.T) {
 	secret := "test_ttlexpire12345678901234" //nolint:gosec // G101: test fixture, not a real credential
 	loader.addKey(secret, true)
 
-	clock := newTestClock(time.Now())
+	clock := testutil.NewFakeClock(time.Now())
 	c := New(
 		loader,
 		matchEqual,
@@ -296,7 +266,7 @@ func TestCache_TTLExpiration_InvalidKey(t *testing.T) {
 	loader := newMockLoader()
 	loader.addKey("test_realkey999999999999999", true)
 
-	clock := newTestClock(time.Now())
+	clock := testutil.NewFakeClock(time.Now())
 	c := New(
 		loader,
 		matchEqual,
@@ -388,7 +358,7 @@ func TestCache_Stats(t *testing.T) {
 	loader := newMockLoader()
 	loader.addKey("test_statskey1234567890123", true)
 
-	clock := newTestClock(time.Now())
+	clock := testutil.NewFakeClock(time.Now())
 	c := New(loader, matchEqual, WithNowFunc(clock.Now))
 	ctx := context.Background()
 
@@ -628,7 +598,7 @@ func TestCache_MaxEntriesEviction(t *testing.T) {
 	// Add a valid key for the cache to load.
 	loader.addKey("test_evicttest123456789012", true)
 
-	clock := newTestClock(time.Now())
+	clock := testutil.NewFakeClock(time.Now())
 	maxEntries := 100
 	c := New(loader, matchEqual, WithNowFunc(clock.Now), WithMaxEntries(maxEntries))
 	ctx := context.Background()
@@ -663,7 +633,7 @@ func TestCache_MaxEntriesEviction_RemovesOldestWhenNoneExpired(t *testing.T) {
 	// Add a valid key for the cache to load.
 	loader.addKey("test_evictoldest123456789012", true)
 
-	clock := newTestClock(time.Now())
+	clock := testutil.NewFakeClock(time.Now())
 	maxEntries := 100
 	c := New(loader, matchEqual, WithNowFunc(clock.Now), WithMaxEntries(maxEntries))
 	ctx := context.Background()
@@ -726,7 +696,7 @@ func TestCache_RemoveOldestEntries_DynamicPercentage(t *testing.T) {
 			t.Parallel()
 
 			loader := newMockLoader()
-			clock := newTestClock(time.Now())
+			clock := testutil.NewFakeClock(time.Now())
 			c := New(loader, matchEqual, WithNowFunc(clock.Now))
 
 			// Fill cache with entries of varying ages.
@@ -883,7 +853,7 @@ func BenchmarkCache_ParallelReads(b *testing.B) {
 func BenchmarkCache_Eviction(b *testing.B) {
 	const size = 5000
 
-	clock := newTestClock(time.Unix(0, 0).UTC())
+	clock := testutil.NewFakeClock(time.Unix(0, 0).UTC())
 	loader := newMockLoader()
 	c := New(loader, matchEqual, WithMaxEntries(size), WithNowFunc(clock.Now))
 

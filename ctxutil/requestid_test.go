@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/mrz1836/go-foundation/ctxutil"
 )
 
@@ -25,9 +27,7 @@ func TestWithRequestID_RoundTrip(t *testing.T) {
 			t.Parallel()
 
 			ctx := ctxutil.WithRequestID(context.Background(), tt.id)
-			if got := ctxutil.RequestIDFrom(ctx); got != tt.want {
-				t.Fatalf("RequestIDFrom() = %q, want %q", got, tt.want)
-			}
+			assert.Equal(t, tt.want, ctxutil.RequestIDFrom(ctx))
 		})
 	}
 }
@@ -37,20 +37,14 @@ func TestWithRequestID_EmptyReturnsSameContext(t *testing.T) {
 
 	base := context.Background()
 	got := ctxutil.WithRequestID(base, "")
-	if got != base {
-		t.Fatalf("WithRequestID(ctx, \"\") returned a new context; want the original unchanged")
-	}
-	if id := ctxutil.RequestIDFrom(got); id != "" {
-		t.Fatalf("RequestIDFrom() = %q, want empty after no-op set", id)
-	}
+	assert.Equal(t, base, got, "WithRequestID(ctx, \"\") must return the original context unchanged")
+	assert.Empty(t, ctxutil.RequestIDFrom(got))
 }
 
 func TestRequestIDFrom_MissingKey(t *testing.T) {
 	t.Parallel()
 
-	if got := ctxutil.RequestIDFrom(context.Background()); got != "" {
-		t.Fatalf("RequestIDFrom(Background()) = %q, want empty", got)
-	}
+	assert.Empty(t, ctxutil.RequestIDFrom(context.Background()))
 }
 
 func TestWithRequestID_Overwrite(t *testing.T) {
@@ -58,9 +52,7 @@ func TestWithRequestID_Overwrite(t *testing.T) {
 
 	ctx := ctxutil.WithRequestID(context.Background(), "first")
 	ctx = ctxutil.WithRequestID(ctx, "second")
-	if got := ctxutil.RequestIDFrom(ctx); got != "second" {
-		t.Fatalf("RequestIDFrom() after overwrite = %q, want %q", got, "second")
-	}
+	assert.Equal(t, "second", ctxutil.RequestIDFrom(ctx))
 }
 
 // otherKey is a distinct context-key type local to the test. A value stored
@@ -72,7 +64,5 @@ func TestRequestIDFrom_KeyIsolation(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.WithValue(context.Background(), otherKey{}, "not-the-request-id")
-	if got := ctxutil.RequestIDFrom(ctx); got != "" {
-		t.Fatalf("RequestIDFrom() read a foreign key = %q, want empty", got)
-	}
+	assert.Empty(t, ctxutil.RequestIDFrom(ctx))
 }

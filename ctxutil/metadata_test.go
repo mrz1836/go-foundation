@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/mrz1836/go-foundation/ctxutil"
 )
 
@@ -50,15 +53,11 @@ func TestRequestIDToMetadata(t *testing.T) {
 			out := ctxutil.RequestIDToMetadata(tt.base, tt.requestID)
 
 			// The result is never empty and is always valid JSON.
-			if len(out) == 0 {
-				t.Fatal("RequestIDToMetadata returned an empty blob; want non-empty")
-			}
+			require.NotEmpty(t, out, "RequestIDToMetadata returned an empty blob; want non-empty")
 			decoded := decodeMetadata(t, out)
 
 			// The id round-trips through the extractor.
-			if got := ctxutil.RequestIDFromMetadata(out); got != tt.wantRequestID {
-				t.Fatalf("RequestIDFromMetadata(RequestIDToMetadata(...)) = %q, want %q", got, tt.wantRequestID)
-			}
+			assert.Equal(t, tt.wantRequestID, ctxutil.RequestIDFromMetadata(out))
 
 			// An empty id must not stamp the key at all.
 			if tt.requestID == "" {
@@ -76,9 +75,7 @@ func decodeMetadata(t *testing.T, out []byte) map[string]any {
 	t.Helper()
 
 	var decoded map[string]any
-	if err := json.Unmarshal(out, &decoded); err != nil {
-		t.Fatalf("RequestIDToMetadata produced invalid JSON %q: %v", out, err)
-	}
+	require.NoErrorf(t, json.Unmarshal(out, &decoded), "RequestIDToMetadata produced invalid JSON %q", out)
 
 	return decoded
 }
@@ -87,9 +84,7 @@ func decodeMetadata(t *testing.T, out []byte) map[string]any {
 func assertKeyAbsent(t *testing.T, decoded map[string]any, key string, out []byte) {
 	t.Helper()
 
-	if _, present := decoded[key]; present {
-		t.Fatalf("%s key present for empty id: %q", key, out)
-	}
+	assert.NotContainsf(t, decoded, key, "%s key present for empty id: %q", key, out)
 }
 
 // assertExtraKeys verifies that each want key survives the merge with its value.
@@ -97,9 +92,7 @@ func assertExtraKeys(t *testing.T, decoded map[string]any, want map[string]strin
 	t.Helper()
 
 	for k, wantVal := range want {
-		if got, _ := decoded[k].(string); got != wantVal {
-			t.Fatalf("merged key %q = %v, want %q", k, decoded[k], wantVal)
-		}
+		assert.Equalf(t, wantVal, decoded[k], "merged key %q", k)
 	}
 }
 
@@ -124,9 +117,7 @@ func TestRequestIDFromMetadata(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := ctxutil.RequestIDFromMetadata(tt.raw); got != tt.want {
-				t.Fatalf("RequestIDFromMetadata(%q) = %q, want %q", tt.raw, got, tt.want)
-			}
+			assert.Equal(t, tt.want, ctxutil.RequestIDFromMetadata(tt.raw))
 		})
 	}
 }

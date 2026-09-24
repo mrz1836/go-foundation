@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
 	"github.com/mrz1836/go-foundation/config"
@@ -12,8 +14,6 @@ import (
 
 // TestHealthChecker_SQLiteIntegration demonstrates that the health service
 // works identically with SQLite as with PostgreSQL.
-//
-//nolint:gocognit,gocyclo // Integration test with multiple assertions
 func TestHealthChecker_SQLiteIntegration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
@@ -21,9 +21,7 @@ func TestHealthChecker_SQLiteIntegration(t *testing.T) {
 
 	// Create SQLite in-memory database
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("failed to create SQLite db: %v", err)
-	}
+	require.NoError(t, err, "failed to create SQLite db")
 
 	cfg := &config.Config{
 		Application: config.ApplicationConfig{
@@ -36,41 +34,20 @@ func TestHealthChecker_SQLiteIntegration(t *testing.T) {
 	hc := NewGORMHealthChecker(db, cfg)
 
 	t.Run("Check returns nil for healthy SQLite", func(t *testing.T) {
-		err := hc.Check(context.Background())
-		if err != nil {
-			t.Errorf("expected nil error, got: %v", err)
-		}
+		assert.NoError(t, hc.Check(context.Background()))
 	})
 
 	t.Run("CheckWithDetails returns correct driver", func(t *testing.T) {
 		status, err := hc.CheckWithDetails(context.Background())
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.NoError(t, err)
 
-		if status.Status != StatusHealthy {
-			t.Errorf("expected healthy status, got %s", status.Status)
-		}
+		assert.Equal(t, StatusHealthy, status.Status)
 
-		if status.WriteDatabase == nil {
-			t.Fatal("expected write database info")
-		}
-
-		if status.WriteDatabase.Driver != "sqlite" {
-			t.Errorf("expected sqlite driver, got %s", status.WriteDatabase.Driver)
-		}
-
-		if !status.WriteDatabase.Connected {
-			t.Error("expected write database to be connected")
-		}
-
-		if status.Version != "1.0.0-test" {
-			t.Errorf("expected version 1.0.0-test, got %s", status.Version)
-		}
-
-		if status.Environment != "test" {
-			t.Errorf("expected environment test, got %s", status.Environment)
-		}
+		require.NotNil(t, status.WriteDatabase, "expected write database info")
+		assert.Equal(t, "sqlite", status.WriteDatabase.Driver)
+		assert.True(t, status.WriteDatabase.Connected, "expected write database to be connected")
+		assert.Equal(t, "1.0.0-test", status.Version)
+		assert.Equal(t, "test", status.Environment)
 	})
 }
 
@@ -86,25 +63,13 @@ func TestHealthChecker_SQLiteSameAsPostgres(t *testing.T) {
 	hc := NewGORMHealthChecker(db, nil)
 
 	status, err := hc.CheckWithDetails(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Verify structure matches what PostgreSQL would return
-	if status.Status == "" {
-		t.Error("status should not be empty")
-	}
+	assert.NotEmpty(t, status.Status, "status should not be empty")
+	assert.False(t, status.Timestamp.IsZero(), "timestamp should be set")
 
-	if status.Timestamp.IsZero() {
-		t.Error("timestamp should be set")
-	}
-
-	if status.WriteDatabase == nil {
-		t.Fatal("write database info should be present")
-	}
-
-	if status.WriteDatabase.Latency <= 0 {
-		t.Error("latency should be positive")
-	}
+	require.NotNil(t, status.WriteDatabase, "write database info should be present")
+	assert.Positive(t, status.WriteDatabase.Latency, "latency should be positive")
 	// Driver will be different (sqlite vs postgres), but structure is same
 }

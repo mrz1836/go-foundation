@@ -2,9 +2,11 @@ package pagination_test
 
 import (
 	"encoding/base64"
-	"errors"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/mrz1836/go-foundation/pagination"
 )
@@ -26,13 +28,9 @@ func TestEncodeCursor_DecodeCursor_RoundTrip(t *testing.T) {
 			cursor := pagination.EncodeCursor(want)
 
 			got, err := pagination.DecodeCursor(cursor)
-			if err != nil {
-				t.Fatalf("DecodeCursor(%q): %v", cursor, err)
-			}
+			require.NoError(t, err)
 			// Cursors have second-level precision (Unix timestamp)
-			if got.Unix() != want.Unix() {
-				t.Errorf("got %v, want %v", got.Unix(), want.Unix())
-			}
+			assert.Equal(t, want.Unix(), got.Unix())
 		})
 	}
 }
@@ -41,11 +39,8 @@ func TestEncodeCursor_IsURLSafe(t *testing.T) {
 	t.Parallel()
 
 	cursor := pagination.EncodeCursor(time.Now())
-	for _, ch := range cursor {
-		if ch == '+' || ch == '/' {
-			t.Errorf("cursor %q contains non-URL-safe character %q", cursor, ch)
-		}
-	}
+	assert.NotContains(t, cursor, "+")
+	assert.NotContains(t, cursor, "/")
 }
 
 func TestDecodeCursor_AcceptsStandardBase64(t *testing.T) {
@@ -61,13 +56,9 @@ func TestDecodeCursor_AcceptsStandardBase64(t *testing.T) {
 	}())
 
 	got, err := pagination.DecodeCursor(stdCursor)
-	if err != nil {
-		t.Fatalf("DecodeCursor standard base64: %v", err)
-	}
+	require.NoError(t, err)
 
-	if got.Unix() != want.Unix() {
-		t.Errorf("got %v, want %v", got.Unix(), want.Unix())
-	}
+	assert.Equal(t, want.Unix(), got.Unix())
 }
 
 func TestDecodeCursor_InvalidInputs(t *testing.T) {
@@ -87,13 +78,7 @@ func TestDecodeCursor_InvalidInputs(t *testing.T) {
 			t.Parallel()
 
 			_, err := pagination.DecodeCursor(tt.cursor)
-			if err == nil {
-				t.Fatal("expected error, got nil")
-			}
-
-			if !errors.Is(err, pagination.ErrInvalidCursor) {
-				t.Errorf("error %v does not wrap ErrInvalidCursor", err)
-			}
+			require.ErrorIs(t, err, pagination.ErrInvalidCursor)
 		})
 	}
 }
@@ -102,26 +87,16 @@ func TestListMeta_JSON(t *testing.T) {
 	t.Parallel()
 
 	meta := pagination.ListMeta{Total: 42}
-	if meta.Total != 42 {
-		t.Errorf("Total = %d, want 42", meta.Total)
-	}
+	assert.Equal(t, 42, meta.Total)
 }
 
 func TestCursorPagination_Defaults(t *testing.T) {
 	t.Parallel()
 
 	p := pagination.CursorPagination{HasMore: true, Limit: 20}
-	if p.Cursor != "" {
-		t.Errorf("Cursor should default to empty, got %q", p.Cursor)
-	}
-
-	if !p.HasMore {
-		t.Error("HasMore should be true")
-	}
-
-	if p.Limit != 20 {
-		t.Errorf("Limit = %d, want 20", p.Limit)
-	}
+	assert.Empty(t, p.Cursor, "Cursor should default to empty")
+	assert.True(t, p.HasMore, "HasMore should be true")
+	assert.Equal(t, 20, p.Limit)
 }
 
 func BenchmarkEncodeCursor(b *testing.B) {

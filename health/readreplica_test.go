@@ -2,8 +2,10 @@ package health
 
 import (
 	"context"
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/mrz1836/go-foundation/config"
 )
@@ -15,21 +17,12 @@ func TestGORMHealthChecker_CheckWithDetails_SharedReadConnection(t *testing.T) {
 	hc := NewGORMHealthChecker(db, nil, WithReadDatabase(db)) // same handle for read + write
 
 	status, err := hc.CheckWithDetails(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 
-	if status.Status != StatusHealthy {
-		t.Errorf("status = %s, want healthy", status.Status)
-	}
+	assert.Equal(t, StatusHealthy, status.Status)
 
-	if status.ReadDatabase == nil {
-		t.Fatal("expected read database health for a shared connection")
-	}
-
-	if !strings.Contains(status.ReadDatabase.Host, "shared with write") {
-		t.Errorf("read host = %q, want it to note the shared connection", status.ReadDatabase.Host)
-	}
+	require.NotNil(t, status.ReadDatabase, "expected read database health for a shared connection")
+	assert.Contains(t, status.ReadDatabase.Host, "shared with write", "read host should note the shared connection")
 }
 
 func TestGORMHealthChecker_CheckWithDetails_SeparateHealthyRead(t *testing.T) {
@@ -44,25 +37,14 @@ func TestGORMHealthChecker_CheckWithDetails_SeparateHealthyRead(t *testing.T) {
 	hc := NewGORMHealthChecker(writeDB, cfg, WithReadDatabase(readDB))
 
 	status, err := hc.CheckWithDetails(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 
-	if status.Status != StatusHealthy {
-		t.Errorf("status = %s, want healthy", status.Status)
-	}
+	assert.Equal(t, StatusHealthy, status.Status)
 
-	if status.ReadDatabase == nil || !status.ReadDatabase.Connected {
-		t.Fatal("expected a connected, separate read database")
-	}
-
-	if status.ReadDatabase.Host != "reader.example.com" {
-		t.Errorf("read host = %q, want reader.example.com", status.ReadDatabase.Host)
-	}
-
-	if status.WriteDatabase.Host != "writer.example.com" {
-		t.Errorf("write host = %q, want writer.example.com", status.WriteDatabase.Host)
-	}
+	require.NotNil(t, status.ReadDatabase, "expected a separate read database")
+	assert.True(t, status.ReadDatabase.Connected, "expected the read database to be connected")
+	assert.Equal(t, "reader.example.com", status.ReadDatabase.Host)
+	assert.Equal(t, "writer.example.com", status.WriteDatabase.Host)
 }
 
 func TestGORMHealthChecker_CheckWithDetails_UnhealthyReadIsDegraded(t *testing.T) {
@@ -74,24 +56,17 @@ func TestGORMHealthChecker_CheckWithDetails_UnhealthyReadIsDegraded(t *testing.T
 
 	// Close only the read replica: write stays healthy, so overall = degraded.
 	readSQL, err := readDB.DB()
-	if err != nil {
-		t.Fatalf("get read db: %v", err)
-	}
+	require.NoError(t, err, "get read db")
 
 	_ = readSQL.Close()
 
 	status, err := hc.CheckWithDetails(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 
-	if status.Status != StatusDegraded {
-		t.Errorf("status = %s, want degraded", status.Status)
-	}
+	assert.Equal(t, StatusDegraded, status.Status)
 
-	if status.ReadDatabase == nil || status.ReadDatabase.Connected {
-		t.Error("expected the read database to report as not connected")
-	}
+	require.NotNil(t, status.ReadDatabase)
+	assert.False(t, status.ReadDatabase.Connected, "expected the read database to report as not connected")
 }
 
 func TestGORMHealthChecker_SetReadDatabase(t *testing.T) {
@@ -103,13 +78,9 @@ func TestGORMHealthChecker_SetReadDatabase(t *testing.T) {
 	hc := NewGORMHealthChecker(writeDB, nil)
 	hc.SetReadDatabase(readDB)
 
-	if hc.readDB != readDB {
-		t.Fatal("SetReadDatabase did not attach the read connection")
-	}
+	require.Same(t, readDB, hc.readDB, "SetReadDatabase did not attach the read connection")
 
-	if err := hc.Check(context.Background()); err != nil {
-		t.Errorf("unexpected error with healthy read replica: %v", err)
-	}
+	assert.NoError(t, hc.Check(context.Background()), "unexpected error with healthy read replica")
 }
 
 func TestGORMHealthChecker_NilWriteDatabase(t *testing.T) {
@@ -118,25 +89,15 @@ func TestGORMHealthChecker_NilWriteDatabase(t *testing.T) {
 	hc := NewGORMHealthChecker(nil, nil)
 
 	// Check pings nil → ErrDatabaseNotConfigured.
-	if err := hc.Check(context.Background()); err == nil {
-		t.Error("expected an error when the write database is nil")
-	}
+	require.Error(t, hc.Check(context.Background()), "expected an error when the write database is nil")
 
 	// CheckWithDetails reports the write database as unconfigured/unhealthy.
 	status, err := hc.CheckWithDetails(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 
-	if status.Status != StatusUnhealthy {
-		t.Errorf("status = %s, want unhealthy", status.Status)
-	}
+	assert.Equal(t, StatusUnhealthy, status.Status)
 
-	if status.WriteDatabase == nil || status.WriteDatabase.Connected {
-		t.Error("expected write database to report as not connected")
-	}
-
-	if status.WriteDatabase.Error == "" {
-		t.Error("expected an error message for the unconfigured write database")
-	}
+	require.NotNil(t, status.WriteDatabase)
+	assert.False(t, status.WriteDatabase.Connected, "expected write database to report as not connected")
+	assert.NotEmpty(t, status.WriteDatabase.Error, "expected an error message for the unconfigured write database")
 }

@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
 	"github.com/mrz1836/go-foundation/config"
@@ -17,10 +19,7 @@ func TestGORMHealthChecker_Check(t *testing.T) {
 		db := createTestDB(t)
 		hc := NewGORMHealthChecker(db, nil)
 
-		err := hc.Check(context.Background())
-		if err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
+		assert.NoError(t, hc.Check(context.Background()))
 	})
 
 	t.Run("respects context cancellation", func(t *testing.T) {
@@ -30,14 +29,10 @@ func TestGORMHealthChecker_Check(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // Cancel immediately
 
-		err := hc.Check(ctx)
-		if err == nil {
-			t.Error("expected error for canceled context")
-		}
+		assert.Error(t, hc.Check(ctx), "expected error for canceled context")
 	})
 }
 
-//nolint:gocognit,gocyclo // Test function with multiple sub-tests
 func TestGORMHealthChecker_CheckWithDetails(t *testing.T) {
 	t.Parallel()
 
@@ -53,41 +48,17 @@ func TestGORMHealthChecker_CheckWithDetails(t *testing.T) {
 		hc := NewGORMHealthChecker(db, cfg)
 
 		status, err := hc.CheckWithDetails(context.Background())
-		if err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
+		require.NoError(t, err)
 
-		if status.Status != StatusHealthy {
-			t.Errorf("expected healthy status, got %s", status.Status)
-		}
+		assert.Equal(t, StatusHealthy, status.Status)
+		assert.Equal(t, "1.0.0", status.Version)
+		assert.Equal(t, "test", status.Environment)
+		assert.False(t, status.Timestamp.IsZero(), "expected non-zero timestamp")
 
-		if status.Version != "1.0.0" {
-			t.Errorf("expected version 1.0.0, got %s", status.Version)
-		}
-
-		if status.Environment != "test" {
-			t.Errorf("expected environment test, got %s", status.Environment)
-		}
-
-		if status.Timestamp.IsZero() {
-			t.Error("expected non-zero timestamp")
-		}
-
-		if status.WriteDatabase == nil {
-			t.Fatal("expected write database health info")
-		}
-
-		if !status.WriteDatabase.Connected {
-			t.Error("expected write database connected")
-		}
-
-		if status.WriteDatabase.Driver != "sqlite" {
-			t.Errorf("expected sqlite driver, got %s", status.WriteDatabase.Driver)
-		}
-
-		if status.WriteDatabase.Latency <= 0 {
-			t.Error("expected positive latency")
-		}
+		require.NotNil(t, status.WriteDatabase, "expected write database health info")
+		assert.True(t, status.WriteDatabase.Connected, "expected write database connected")
+		assert.Equal(t, "sqlite", status.WriteDatabase.Driver)
+		assert.Positive(t, status.WriteDatabase.Latency, "expected positive latency")
 	})
 
 	t.Run("works without config", func(t *testing.T) {
@@ -95,17 +66,11 @@ func TestGORMHealthChecker_CheckWithDetails(t *testing.T) {
 		hc := NewGORMHealthChecker(db, nil)
 
 		status, err := hc.CheckWithDetails(context.Background())
-		if err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
+		require.NoError(t, err)
 
-		if status.Status != StatusHealthy {
-			t.Errorf("expected healthy status, got %s", status.Status)
-		}
+		assert.Equal(t, StatusHealthy, status.Status)
 		// Version and Environment should be empty without config
-		if status.Version != "" {
-			t.Errorf("expected empty version without config, got %s", status.Version)
-		}
+		assert.Empty(t, status.Version, "expected empty version without config")
 	})
 
 	t.Run("respects context timeout", func(t *testing.T) {
@@ -122,13 +87,10 @@ func TestGORMHealthChecker_CheckWithDetails(t *testing.T) {
 			t.Logf("got error as expected: %v", err)
 		}
 
-		if status == nil {
-			t.Error("expected status even when unhealthy")
-		}
+		assert.NotNil(t, status, "expected status even when unhealthy")
 	})
 }
 
-//nolint:gocognit // Test function with multiple construction sub-tests
 func TestNewGORMHealthChecker(t *testing.T) {
 	t.Parallel()
 
@@ -137,21 +99,11 @@ func TestNewGORMHealthChecker(t *testing.T) {
 		cfg := &config.Config{}
 
 		hc := NewGORMHealthChecker(db, cfg)
-		if hc == nil {
-			t.Fatal("expected health checker, got nil")
-		}
+		require.NotNil(t, hc, "expected health checker, got nil")
 
-		if hc.writeDB != db {
-			t.Error("writeDB not set correctly")
-		}
-
-		if hc.cfg != cfg {
-			t.Error("cfg not set correctly")
-		}
-
-		if hc.readDB != nil {
-			t.Error("readDB should be nil without WithReadDatabase")
-		}
+		assert.Same(t, db, hc.writeDB, "writeDB not set correctly")
+		assert.Same(t, cfg, hc.cfg, "cfg not set correctly")
+		assert.Nil(t, hc.readDB, "readDB should be nil without WithReadDatabase")
 	})
 
 	t.Run("WithReadDatabase attaches a read connection", func(t *testing.T) {
@@ -159,13 +111,8 @@ func TestNewGORMHealthChecker(t *testing.T) {
 		readDB := createTestDB(t)
 
 		hc := NewGORMHealthChecker(writeDB, nil, WithReadDatabase(readDB))
-		if hc.readDB != readDB {
-			t.Error("readDB not set by WithReadDatabase")
-		}
-
-		if hc.writeDB != writeDB {
-			t.Error("writeDB not set correctly")
-		}
+		assert.Same(t, readDB, hc.readDB, "readDB not set by WithReadDatabase")
+		assert.Same(t, writeDB, hc.writeDB, "writeDB not set correctly")
 	})
 }
 
@@ -176,21 +123,15 @@ func TestGORMHealthChecker_Check_WithReadReplica(t *testing.T) {
 	readDB := createTestDB(t)
 	hc := NewGORMHealthChecker(writeDB, nil, WithReadDatabase(readDB))
 
-	if err := hc.Check(context.Background()); err != nil {
-		t.Errorf("unexpected error with healthy read replica: %v", err)
-	}
+	require.NoError(t, hc.Check(context.Background()), "unexpected error with healthy read replica")
 
 	// Closing the read replica must surface as an unhealthy check.
 	sqlDB, err := readDB.DB()
-	if err != nil {
-		t.Fatalf("failed to get underlying read db: %v", err)
-	}
+	require.NoError(t, err, "failed to get underlying read db")
 
 	_ = sqlDB.Close()
 
-	if err = hc.Check(context.Background()); err == nil {
-		t.Error("expected error when read replica is down")
-	}
+	assert.Error(t, hc.Check(context.Background()), "expected error when read replica is down")
 }
 
 // createTestDB creates an in-memory SQLite database for testing.
@@ -198,9 +139,7 @@ func createTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("failed to create test db: %v", err)
-	}
+	require.NoError(t, err, "failed to create test db")
 
 	return db
 }
@@ -213,17 +152,12 @@ func TestGORMHealthChecker_Check_ClosedDatabase(t *testing.T) {
 
 	// Close the underlying database
 	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatalf("failed to get underlying db: %v", err)
-	}
+	require.NoError(t, err, "failed to get underlying db")
 
 	_ = sqlDB.Close()
 
 	// Check should return an error for closed database
-	err = hc.Check(context.Background())
-	if err == nil {
-		t.Error("expected error for closed database")
-	}
+	assert.Error(t, hc.Check(context.Background()), "expected error for closed database")
 }
 
 func TestGORMHealthChecker_CheckWithDetails_ClosedDatabase(t *testing.T) {
@@ -241,37 +175,20 @@ func TestGORMHealthChecker_CheckWithDetails_ClosedDatabase(t *testing.T) {
 
 	// Close the underlying database
 	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatalf("failed to get underlying db: %v", err)
-	}
+	require.NoError(t, err, "failed to get underlying db")
 
 	_ = sqlDB.Close()
 
 	// CheckWithDetails should return unhealthy status for closed database
 	status, err := hc.CheckWithDetails(context.Background())
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, status, "expected status, got nil")
 
-	if status == nil {
-		t.Fatal("expected status, got nil")
-	}
+	assert.Equal(t, StatusUnhealthy, status.Status)
 
-	if status.Status != StatusUnhealthy {
-		t.Errorf("expected unhealthy status, got %s", status.Status)
-	}
-
-	if status.WriteDatabase == nil {
-		t.Fatal("expected write database health info")
-	}
-
-	if status.WriteDatabase.Connected {
-		t.Error("expected write database not connected for closed db")
-	}
-
-	if status.WriteDatabase.Error == "" {
-		t.Error("expected error message for closed db")
-	}
+	require.NotNil(t, status.WriteDatabase, "expected write database health info")
+	assert.False(t, status.WriteDatabase.Connected, "expected write database not connected for closed db")
+	assert.NotEmpty(t, status.WriteDatabase.Error, "expected error message for closed db")
 }
 
 func TestGORMHealthChecker_CheckWithDetails_VerifyFields(t *testing.T) {
@@ -287,26 +204,13 @@ func TestGORMHealthChecker_CheckWithDetails_VerifyFields(t *testing.T) {
 	hc := NewGORMHealthChecker(db, cfg)
 
 	status, err := hc.CheckWithDetails(context.Background())
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Verify all fields are properly populated
-	if status.Version != "2.5.0" {
-		t.Errorf("expected version 2.5.0, got %s", status.Version)
-	}
-
-	if status.Environment != "production" {
-		t.Errorf("expected environment production, got %s", status.Environment)
-	}
-
-	if status.WriteDatabase.Driver == "" {
-		t.Error("expected non-empty driver name")
-	}
-
-	if status.WriteDatabase.Latency <= 0 {
-		t.Error("expected positive latency measurement")
-	}
+	assert.Equal(t, "2.5.0", status.Version)
+	assert.Equal(t, "production", status.Environment)
+	assert.NotEmpty(t, status.WriteDatabase.Driver, "expected non-empty driver name")
+	assert.Positive(t, status.WriteDatabase.Latency, "expected positive latency measurement")
 }
 
 func TestGORMHealthChecker_Check_MultipleSuccessfulCalls(t *testing.T) {
@@ -317,9 +221,7 @@ func TestGORMHealthChecker_Check_MultipleSuccessfulCalls(t *testing.T) {
 
 	// Multiple successful checks should all pass
 	for i := range 3 {
-		if err := hc.Check(context.Background()); err != nil {
-			t.Errorf("check %d failed: %v", i+1, err)
-		}
+		assert.NoErrorf(t, hc.Check(context.Background()), "check %d failed", i+1)
 	}
 }
 
@@ -338,13 +240,9 @@ func TestGORMHealthChecker_CheckWithDetails_MultipleSuccessfulCalls(t *testing.T
 	// Multiple successful checks should all return healthy
 	for i := range 3 {
 		status, err := hc.CheckWithDetails(context.Background())
-		if err != nil {
-			t.Errorf("check %d failed: %v", i+1, err)
-		}
+		require.NoErrorf(t, err, "check %d failed", i+1)
 
-		if status.Status != StatusHealthy {
-			t.Errorf("check %d: expected healthy, got %s", i+1, status.Status)
-		}
+		assert.Equalf(t, StatusHealthy, status.Status, "check %d: expected healthy", i+1)
 	}
 }
 
@@ -358,16 +256,9 @@ func TestGORMHealthChecker_UnderlyingDBError(t *testing.T) {
 	hc := NewGORMHealthChecker(broken, nil)
 	ctx := context.Background()
 
-	if err := hc.pingDatabase(ctx, broken, "write"); err == nil {
-		t.Error("pingDatabase: expected an error when DB() fails")
-	}
+	require.Error(t, hc.pingDatabase(ctx, broken, "write"), "pingDatabase: expected an error when DB() fails")
 
 	dbHealth := hc.checkDatabaseHealth(ctx, broken, "write")
-	if dbHealth.Connected {
-		t.Error("checkDatabaseHealth: expected Connected=false when DB() fails")
-	}
-
-	if dbHealth.Error == "" {
-		t.Error("checkDatabaseHealth: expected a non-empty error message")
-	}
+	assert.False(t, dbHealth.Connected, "checkDatabaseHealth: expected Connected=false when DB() fails")
+	assert.NotEmpty(t, dbHealth.Error, "checkDatabaseHealth: expected a non-empty error message")
 }

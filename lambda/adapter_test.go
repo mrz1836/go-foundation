@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/aws/aws-lambda-go/events"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	lambdahttp "github.com/mrz1836/go-foundation/lambda"
 )
@@ -32,26 +34,16 @@ func TestServeHTTP_BasicRequest(t *testing.T) {
 	}
 
 	resp, err := lambdahttp.ServeHTTP(context.Background(), event, echoHandler())
-	if err != nil {
-		t.Fatalf("ServeHTTP: %v", err)
-	}
+	require.NoError(t, err)
 
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("StatusCode = %d, want 200", resp.StatusCode)
-	}
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	wantBody := `{"ok":true,"request_id":"apigw-req-123"}`
-	if resp.Body != wantBody {
-		t.Errorf("Body = %q, want %q", resp.Body, wantBody)
-	}
+	assert.Equal(t, wantBody, resp.Body)
 
-	if resp.IsBase64Encoded {
-		t.Error("IsBase64Encoded should be false for UTF-8 body")
-	}
+	assert.False(t, resp.IsBase64Encoded, "IsBase64Encoded should be false for UTF-8 body")
 	// Go canonicalises "Content-Type" → "Content-Type" (already canonical)
-	if resp.Headers["Content-Type"] != "application/json" {
-		t.Errorf("Content-Type header = %q", resp.Headers["Content-Type"])
-	}
+	assert.Equal(t, "application/json", resp.Headers["Content-Type"])
 }
 
 func TestServeHTTP_QueryString(t *testing.T) {
@@ -71,13 +63,9 @@ func TestServeHTTP_QueryString(t *testing.T) {
 	}
 
 	resp, err := lambdahttp.ServeHTTP(context.Background(), event, queryHandler)
-	if err != nil {
-		t.Fatalf("ServeHTTP: %v", err)
-	}
+	require.NoError(t, err)
 
-	if resp.Body != "limit=20&cursor=abc123" {
-		t.Errorf("Body = %q, want 'limit=20&cursor=abc123'", resp.Body)
-	}
+	assert.Equal(t, "limit=20&cursor=abc123", resp.Body)
 }
 
 func TestServeHTTP_EmptyPathDefaultsToRoot(t *testing.T) {
@@ -96,13 +84,9 @@ func TestServeHTTP_EmptyPathDefaultsToRoot(t *testing.T) {
 	}
 
 	resp, err := lambdahttp.ServeHTTP(context.Background(), event, pathHandler)
-	if err != nil {
-		t.Fatalf("ServeHTTP: %v", err)
-	}
+	require.NoError(t, err)
 
-	if resp.Body != "/" {
-		t.Errorf("Body = %q, want '/'", resp.Body)
-	}
+	assert.Equal(t, "/", resp.Body)
 }
 
 func TestServeHTTP_EmptyMethodDefaultsToGET(t *testing.T) {
@@ -119,13 +103,9 @@ func TestServeHTTP_EmptyMethodDefaultsToGET(t *testing.T) {
 	}
 
 	resp, err := lambdahttp.ServeHTTP(context.Background(), event, methodHandler)
-	if err != nil {
-		t.Fatalf("ServeHTTP: %v", err)
-	}
+	require.NoError(t, err)
 
-	if resp.Body != "GET" {
-		t.Errorf("Body = %q, want 'GET'", resp.Body)
-	}
+	assert.Equal(t, "GET", resp.Body)
 }
 
 func TestServeHTTP_Base64EncodedRequestBody(t *testing.T) {
@@ -150,13 +130,9 @@ func TestServeHTTP_Base64EncodedRequestBody(t *testing.T) {
 	}
 
 	resp, err := lambdahttp.ServeHTTP(context.Background(), event, bodyHandler)
-	if err != nil {
-		t.Fatalf("ServeHTTP: %v", err)
-	}
+	require.NoError(t, err)
 
-	if resp.Body != string(payload) {
-		t.Errorf("Body = %q, want %q", resp.Body, string(payload))
-	}
+	assert.Equal(t, string(payload), resp.Body)
 }
 
 func TestServeHTTP_BinaryResponseBase64Encoded(t *testing.T) {
@@ -176,22 +152,14 @@ func TestServeHTTP_BinaryResponseBase64Encoded(t *testing.T) {
 	}
 
 	resp, err := lambdahttp.ServeHTTP(context.Background(), event, binaryHandler)
-	if err != nil {
-		t.Fatalf("ServeHTTP: %v", err)
-	}
+	require.NoError(t, err)
 
-	if !resp.IsBase64Encoded {
-		t.Error("IsBase64Encoded should be true for binary body")
-	}
+	assert.True(t, resp.IsBase64Encoded, "IsBase64Encoded should be true for binary body")
 
 	decoded, decErr := base64.StdEncoding.DecodeString(resp.Body)
-	if decErr != nil {
-		t.Fatalf("base64 decode: %v", decErr)
-	}
+	require.NoError(t, decErr)
 
-	if string(decoded) != string([]byte{0xFF, 0xFE, 0x00, 0x01}) {
-		t.Errorf("decoded body mismatch")
-	}
+	assert.Equal(t, []byte{0xFF, 0xFE, 0x00, 0x01}, decoded, "decoded body mismatch")
 }
 
 func TestServeHTTP_URLParseError(t *testing.T) {
@@ -209,13 +177,9 @@ func TestServeHTTP_URLParseError(t *testing.T) {
 	resp, err := lambdahttp.ServeHTTP(context.Background(), event, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
-	if err == nil {
-		t.Fatal("expected error from ServeHTTP on URL with control character, got nil")
-	}
+	require.Error(t, err, "expected error from ServeHTTP on URL with control character")
 
-	if resp.StatusCode != http.StatusInternalServerError {
-		t.Errorf("StatusCode = %d, want 500", resp.StatusCode)
-	}
+	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
 }
 
 func TestServeHTTP_InvalidHTTPMethod(t *testing.T) {
@@ -233,13 +197,9 @@ func TestServeHTTP_InvalidHTTPMethod(t *testing.T) {
 	resp, err := lambdahttp.ServeHTTP(context.Background(), event, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
-	if err == nil {
-		t.Fatal("expected error from ServeHTTP on invalid HTTP method, got nil")
-	}
+	require.Error(t, err, "expected error from ServeHTTP on invalid HTTP method")
 
-	if resp.StatusCode != http.StatusInternalServerError {
-		t.Errorf("StatusCode = %d, want 500", resp.StatusCode)
-	}
+	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
 }
 
 func TestServeHTTP_RequestConversionError(t *testing.T) {
@@ -259,17 +219,10 @@ func TestServeHTTP_RequestConversionError(t *testing.T) {
 	resp, err := lambdahttp.ServeHTTP(context.Background(), event, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
-	if err == nil {
-		t.Fatal("expected error from ServeHTTP on invalid base64 body, got nil")
-	}
+	require.Error(t, err, "expected error from ServeHTTP on invalid base64 body")
 
-	if resp.StatusCode != http.StatusInternalServerError {
-		t.Errorf("StatusCode = %d, want 500", resp.StatusCode)
-	}
-
-	if resp.Headers["Content-Type"] != "application/json" {
-		t.Errorf("Content-Type = %q, want application/json", resp.Headers["Content-Type"])
-	}
+	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	assert.Equal(t, "application/json", resp.Headers["Content-Type"])
 }
 
 func TestServeHTTP_HeadersAndCookiesForwarded(t *testing.T) {
@@ -292,17 +245,11 @@ func TestServeHTTP_HeadersAndCookiesForwarded(t *testing.T) {
 	}
 
 	resp, err := lambdahttp.ServeHTTP(context.Background(), event, captureHandler)
-	if err != nil {
-		t.Fatalf("ServeHTTP: %v", err)
-	}
+	require.NoError(t, err)
 
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("StatusCode = %d, want 200", resp.StatusCode)
-	}
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	// Authorization header present
-	if len(resp.Body) == 0 || resp.Body[:12] != "Bearer token" {
-		t.Errorf("expected Authorization header in body, got %q", resp.Body)
-	}
+	assert.Contains(t, resp.Body, "Bearer token", "expected Authorization header in body")
 }
 
 func TestServeHTTP_SetCookieNotCommaJoined(t *testing.T) {
@@ -322,25 +269,14 @@ func TestServeHTTP_SetCookieNotCommaJoined(t *testing.T) {
 	}
 
 	resp, err := lambdahttp.ServeHTTP(context.Background(), event, cookieHandler)
-	if err != nil {
-		t.Fatalf("ServeHTTP: %v", err)
-	}
+	require.NoError(t, err)
 	// Set-Cookie should NOT appear in the Headers map
-	if _, ok := resp.Headers["Set-Cookie"]; ok {
-		t.Error("Set-Cookie should not be in Headers map; should be in Cookies slice")
-	}
+	assert.NotContains(t, resp.Headers, "Set-Cookie", "Set-Cookie should not be in Headers map; should be in Cookies slice")
 	// Should be in the Cookies slice
-	if len(resp.Cookies) != 2 {
-		t.Fatalf("Cookies length = %d, want 2", len(resp.Cookies))
-	}
+	require.Len(t, resp.Cookies, 2)
 
-	if resp.Cookies[0] != "session=abc; Path=/; HttpOnly" {
-		t.Errorf("Cookies[0] = %q", resp.Cookies[0])
-	}
-
-	if resp.Cookies[1] != "pref=dark; Path=/" {
-		t.Errorf("Cookies[1] = %q", resp.Cookies[1])
-	}
+	assert.Equal(t, "session=abc; Path=/; HttpOnly", resp.Cookies[0])
+	assert.Equal(t, "pref=dark; Path=/", resp.Cookies[1])
 }
 
 func BenchmarkServeHTTP(b *testing.B) {

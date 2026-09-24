@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestHealthCheckerInterface ensures mock implementations satisfy the interface.
@@ -13,73 +16,42 @@ func TestHealthCheckerInterface(_ *testing.T) {
 }
 
 // TestHealthCheckerContract verifies the interface contract behavior.
-//
-//nolint:gocognit,gocyclo // Test function with multiple sub-tests
 func TestHealthCheckerContract(t *testing.T) {
 	t.Parallel()
 
 	t.Run("Check returns nil when healthy", func(t *testing.T) {
 		mock := NewHealthyMock()
 
-		err := mock.Check(context.Background())
-		if err != nil {
-			t.Errorf("expected nil error, got: %v", err)
-		}
+		assert.NoError(t, mock.Check(context.Background()))
 	})
 
 	t.Run("Check returns error when unhealthy", func(t *testing.T) {
 		mock := NewUnhealthyMock("connection failed")
 
 		err := mock.Check(context.Background())
-		if err == nil {
-			t.Error("expected error, got nil")
-		}
-
-		if !errors.Is(err, ErrUnhealthy) {
-			t.Errorf("expected ErrUnhealthy, got: %v", err)
-		}
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrUnhealthy)
 	})
 
 	t.Run("CheckWithDetails returns healthy status", func(t *testing.T) {
 		mock := NewHealthyMock()
 
 		status, err := mock.CheckWithDetails(context.Background())
-		if err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
-
-		if status == nil {
-			t.Fatal("expected status, got nil")
-		}
-
-		if status.Status != StatusHealthy {
-			t.Errorf("expected status %s, got %s", StatusHealthy, status.Status)
-		}
+		require.NoError(t, err)
+		require.NotNil(t, status)
+		assert.Equal(t, StatusHealthy, status.Status)
 	})
 
 	t.Run("CheckWithDetails returns unhealthy status", func(t *testing.T) {
 		mock := NewUnhealthyMock("db timeout")
 
 		status, err := mock.CheckWithDetails(context.Background())
-		if err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
+		require.NoError(t, err)
+		require.NotNil(t, status)
+		assert.Equal(t, StatusUnhealthy, status.Status)
 
-		if status == nil {
-			t.Fatal("expected status, got nil")
-		}
-
-		if status.Status != StatusUnhealthy {
-			t.Errorf("expected status %s, got %s", StatusUnhealthy, status.Status)
-		}
-
-		if status.WriteDatabase == nil {
-			t.Fatal("expected write database health info")
-		}
-
-		if status.WriteDatabase.Error != "db timeout" {
-			t.Errorf("expected error 'db timeout', got %s", status.WriteDatabase.Error)
-		}
+		require.NotNil(t, status.WriteDatabase)
+		assert.Equal(t, "db timeout", status.WriteDatabase.Error)
 	})
 }
 
@@ -87,8 +59,6 @@ func TestHealthCheckerContract(t *testing.T) {
 var errCustom = errors.New("custom error")
 
 // TestMockHealthChecker_CustomBehavior tests configurable mock behavior.
-//
-//nolint:gocognit // Test function with multiple sub-tests
 func TestMockHealthChecker_CustomBehavior(t *testing.T) {
 	t.Parallel()
 
@@ -100,9 +70,7 @@ func TestMockHealthChecker_CustomBehavior(t *testing.T) {
 		}
 
 		err := mock.Check(context.Background())
-		if !errors.Is(err, errCustom) {
-			t.Errorf("expected custom error, got: %v", err)
-		}
+		require.ErrorIs(t, err, errCustom)
 	})
 
 	t.Run("custom CheckWithDetails function", func(t *testing.T) {
@@ -118,35 +86,24 @@ func TestMockHealthChecker_CustomBehavior(t *testing.T) {
 		}
 
 		status, err := mock.CheckWithDetails(context.Background())
-		if err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
-
-		if status != customStatus {
-			t.Error("expected custom status")
-		}
+		require.NoError(t, err)
+		assert.Same(t, customStatus, status)
 	})
 
 	t.Run("call count tracking", func(t *testing.T) {
 		mock := NewHealthyMock()
 
-		if mock.CallCount() != 0 {
-			t.Error("initial call count should be 0")
-		}
+		assert.Equal(t, 0, mock.CallCount(), "initial call count should be 0")
 
 		_ = mock.Check(context.Background())
 		_ = mock.Check(context.Background())
 		_, _ = mock.CheckWithDetails(context.Background())
 
-		if mock.CallCount() != 3 {
-			t.Errorf("expected 3 calls, got %d", mock.CallCount())
-		}
+		assert.Equal(t, 3, mock.CallCount())
 
 		mock.Reset()
 
-		if mock.CallCount() != 0 {
-			t.Error("call count should be 0 after reset")
-		}
+		assert.Equal(t, 0, mock.CallCount(), "call count should be 0 after reset")
 	})
 }
 
@@ -154,15 +111,7 @@ func TestMockHealthChecker_CustomBehavior(t *testing.T) {
 func TestStatusConstants(t *testing.T) {
 	t.Parallel()
 
-	if StatusHealthy != "healthy" {
-		t.Errorf("StatusHealthy = %s, want healthy", StatusHealthy)
-	}
-
-	if StatusDegraded != "degraded" {
-		t.Errorf("StatusDegraded = %s, want degraded", StatusDegraded)
-	}
-
-	if StatusUnhealthy != "unhealthy" {
-		t.Errorf("StatusUnhealthy = %s, want unhealthy", StatusUnhealthy)
-	}
+	assert.Equal(t, "healthy", StatusHealthy)
+	assert.Equal(t, "degraded", StatusDegraded)
+	assert.Equal(t, "unhealthy", StatusUnhealthy)
 }

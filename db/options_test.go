@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
 	"github.com/mrz1836/go-foundation/config"
@@ -29,9 +31,7 @@ func newMemSQLite(t *testing.T, opts ...Option) *gorm.DB {
 	cfg := &config.WriteDatabaseConfig{Driver: driverSQLite, Database: ":memory:"}
 
 	database, err := NewConnection(cfg, opts...)
-	if err != nil {
-		t.Fatalf("NewConnection failed: %v", err)
-	}
+	require.NoError(t, err, "NewConnection failed")
 
 	t.Cleanup(func() {
 		if sqlDB, derr := database.DB(); derr == nil {
@@ -53,9 +53,7 @@ func newFileSQLite(t *testing.T, opts ...Option) *gorm.DB {
 	}
 
 	database, err := NewConnection(cfg, opts...)
-	if err != nil {
-		t.Fatalf("NewConnection failed: %v", err)
-	}
+	require.NoError(t, err, "NewConnection failed")
 
 	t.Cleanup(func() {
 		if sqlDB, derr := database.DB(); derr == nil {
@@ -91,13 +89,8 @@ func TestNewConnection_GORMConfigMatrix(t *testing.T) {
 
 			database := newMemSQLite(t, tt.opts...)
 
-			if database.SkipDefaultTransaction != tt.wantSkip {
-				t.Errorf("SkipDefaultTransaction = %v, want %v", database.SkipDefaultTransaction, tt.wantSkip)
-			}
-
-			if database.PrepareStmt != tt.wantPrepare {
-				t.Errorf("PrepareStmt = %v, want %v", database.PrepareStmt, tt.wantPrepare)
-			}
+			assert.Equal(t, tt.wantSkip, database.SkipDefaultTransaction)
+			assert.Equal(t, tt.wantPrepare, database.PrepareStmt)
 		})
 	}
 }
@@ -109,9 +102,8 @@ func TestNewConnection_OptionOrderLastWins(t *testing.T) {
 
 	database := newMemSQLite(t, WithSkipDefaultTransaction(true), WithSkipDefaultTransaction(false))
 
-	if database.SkipDefaultTransaction {
-		t.Error("a later option must override an earlier one: want SkipDefaultTransaction=false")
-	}
+	assert.False(t, database.SkipDefaultTransaction,
+		"a later option must override an earlier one: want SkipDefaultTransaction=false")
 }
 
 // TestNewConnection_NilOptionIgnored verifies a nil Option in the variadic slice
@@ -121,9 +113,7 @@ func TestNewConnection_NilOptionIgnored(t *testing.T) {
 
 	database := newMemSQLite(t, nil, WithPrepareStmt(true), nil)
 
-	if !database.PrepareStmt {
-		t.Error("expected PrepareStmt to be enabled alongside nil options")
-	}
+	assert.True(t, database.PrepareStmt, "expected PrepareStmt to be enabled alongside nil options")
 }
 
 // TestNewConnection_WritesRoundTripWithOptions is the behavioral guard: with each
@@ -157,24 +147,16 @@ func assertWritesRoundTrip(t *testing.T, opts ...Option) {
 
 	database := newFileSQLite(t, opts...)
 
-	if err := database.AutoMigrate(&probeRecord{}); err != nil {
-		t.Fatalf("AutoMigrate failed: %v", err)
-	}
+	require.NoError(t, database.AutoMigrate(&probeRecord{}), "AutoMigrate failed")
 
 	for _, name := range []string{"alpha", "beta"} {
-		if err := database.Create(&probeRecord{Name: name}).Error; err != nil {
-			t.Fatalf("Create(%q) failed: %v", name, err)
-		}
+		require.NoErrorf(t, database.Create(&probeRecord{Name: name}).Error, "Create(%q) failed", name)
 	}
 
 	var got []probeRecord
-	if err := database.Find(&got).Error; err != nil {
-		t.Fatalf("Find failed: %v", err)
-	}
+	require.NoError(t, database.Find(&got).Error, "Find failed")
 
-	if len(got) != 2 {
-		t.Fatalf("expected 2 persisted rows, got %d", len(got))
-	}
+	require.Len(t, got, 2, "expected 2 persisted rows")
 }
 
 // TestNewConnection_OptionsPreservePoolConfig verifies options do not disturb the
@@ -189,21 +171,14 @@ func TestNewConnection_OptionsPreservePoolConfig(t *testing.T) {
 	}
 
 	database, err := NewConnection(cfg, WithSkipDefaultTransaction(true), WithPrepareStmt(true))
-	if err != nil {
-		t.Fatalf("NewConnection failed: %v", err)
-	}
+	require.NoError(t, err, "NewConnection failed")
 
 	sqlDB, err := database.DB()
-	if err != nil {
-		t.Fatalf("Failed to get underlying DB: %v", err)
-	}
+	require.NoError(t, err)
 	defer func() {
-		if err := sqlDB.Close(); err != nil {
-			t.Errorf("Failed to close DB: %v", err)
-		}
+		assert.NoError(t, sqlDB.Close())
 	}()
 
-	if stats := sqlDB.Stats(); stats.MaxOpenConnections != 7 {
-		t.Errorf("expected MaxOpenConnections=7 to be preserved, got %d", stats.MaxOpenConnections)
-	}
+	stats := sqlDB.Stats()
+	assert.Equal(t, 7, stats.MaxOpenConnections, "expected MaxOpenConnections=7 to be preserved")
 }

@@ -7,6 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/mrz1836/go-foundation/constants"
 	"github.com/mrz1836/go-foundation/httputil"
 	"github.com/mrz1836/go-foundation/middleware"
@@ -28,18 +31,11 @@ func TestRecoverMiddleware_PanicWithError(t *testing.T) {
 
 	output := captureLogOutput(func() { mw.ServeHTTP(rr, req) })
 
-	if rr.Code != http.StatusInternalServerError {
-		t.Errorf("status = %d, want 500", rr.Code)
-	}
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
 
 	entry := parseLogEntry(t, []byte(output))
-	if entry.Type != "panic" {
-		t.Errorf("type = %q, want 'panic'", entry.Type)
-	}
-
-	if entry.RequestID != "err-panic-id" {
-		t.Errorf("request_id = %q, want 'err-panic-id'", entry.RequestID)
-	}
+	assert.Equal(t, "panic", entry.Type)
+	assert.Equal(t, "err-panic-id", entry.RequestID)
 }
 
 // TestRecoverMiddleware_ResponseBody verifies the 500 response body is the
@@ -58,24 +54,13 @@ func TestRecoverMiddleware_ResponseBody(t *testing.T) {
 
 	captureLogOutput(func() { mw.ServeHTTP(rr, req) })
 
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500", rr.Code)
-	}
+	require.Equal(t, http.StatusInternalServerError, rr.Code)
 
 	var resp httputil.ErrorResponse
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("response body is not a valid ErrorResponse: %v\nbody: %s", err, rr.Body.String())
-	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp),
+		"response body is not a valid ErrorResponse: %s", rr.Body.String())
 
-	if resp.Code != constants.ErrorCodeInternalError {
-		t.Errorf("code = %q, want %q", resp.Code, constants.ErrorCodeInternalError)
-	}
-
-	if resp.Error != constants.ErrorMessageInternalError {
-		t.Errorf("error = %q, want %q", resp.Error, constants.ErrorMessageInternalError)
-	}
-
-	if resp.RequestID != "body-req-id" {
-		t.Errorf("request_id = %q, want 'body-req-id'", resp.RequestID)
-	}
+	assert.Equal(t, constants.ErrorCodeInternalError, resp.Code)
+	assert.Equal(t, constants.ErrorMessageInternalError, resp.Error)
+	assert.Equal(t, "body-req-id", resp.RequestID)
 }

@@ -144,6 +144,18 @@ func TestRepository_DuplicateKeyMapsToTypedError(t *testing.T) {
 	assert.ErrorIs(t, err, models.ErrDuplicateKey, "unique violation maps to ErrDuplicateKey")
 }
 
+// TestWrapDBError_PreservesErrorChain proves a non-constraint driver error keeps
+// its underlying cause in the chain, so callers can still detect a retryable
+// timeout/cancellation behind the typed ErrDatabaseError.
+func TestWrapDBError_PreservesErrorChain(t *testing.T) {
+	t.Parallel()
+
+	wrapped := models.WrapDBError(context.DeadlineExceeded)
+
+	require.ErrorIs(t, wrapped, models.ErrDatabaseError, "classified as a generic DB error")
+	assert.ErrorIs(t, wrapped, context.DeadlineExceeded, "underlying cause stays in the chain")
+}
+
 func TestRepository_NotFoundOnMissing(t *testing.T) {
 	t.Parallel()
 	db := newRepoDB(t)

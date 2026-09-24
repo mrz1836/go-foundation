@@ -5,12 +5,25 @@ import (
 	"strings"
 )
 
-// phoneDigits strips every non-digit character from a phone string.
-var phoneDigits = regexp.MustCompile(`\D`)
-
 // e164Pattern matches the canonical E.164 form: '+' followed by 1–15 digits,
 // where the first digit is non-zero.
 var e164Pattern = regexp.MustCompile(`^\+[1-9]\d{1,14}$`)
+
+// stripNonDigits returns s with every byte that is not an ASCII digit removed.
+// This matches the previous `\D` regexp strip (Go's \d is ASCII-only) without
+// invoking the regexp engine.
+func stripNonDigits(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+
+	for i := range len(s) {
+		if s[i] >= '0' && s[i] <= '9' {
+			b.WriteByte(s[i])
+		}
+	}
+
+	return b.String()
+}
 
 // NormalizePhone canonicalizes a phone string to E.164. A bare 10-digit number
 // is treated as North American. An input that begins with '+' is preserved
@@ -23,10 +36,10 @@ var e164Pattern = regexp.MustCompile(`^\+[1-9]\d{1,14}$`)
 func NormalizePhone(raw, errorField string) (string, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		return "", NewValidationError(errorField, "is required")
+		return "", NewValidationError(errorField, msgRequired)
 	}
 
-	digits := phoneDigits.ReplaceAllString(trimmed, "")
+	digits := stripNonDigits(trimmed)
 
 	var candidate string
 

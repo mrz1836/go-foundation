@@ -64,9 +64,7 @@ type BaseModel[ID ~string] struct {
 // already set. v7 IDs are time-ordered; an explicitly-set ID is preserved
 // unchanged so replay tooling can supply its own identifiers.
 func (b *BaseModel[ID]) BeforeCreate(_ *gorm.DB) error {
-	if b.ID == "" {
-		b.ID = ID(NewID())
-	}
+	b.ID = mintID(b.ID)
 
 	return nil
 }

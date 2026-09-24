@@ -2,6 +2,9 @@ package models
 
 import "strings"
 
+// msgRequired is the shared validation message for an empty required field.
+const msgRequired = "is required"
+
 // Latitude/longitude bounds (WGS84 degrees) shared by the coordinate validators.
 const (
 	minLatitude  = -90.0
@@ -29,7 +32,7 @@ func validateLatLon(lat, lon float64) error {
 func ValidateRequired(value, fieldName string) (string, error) {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
-		return "", NewValidationError(fieldName, "is required")
+		return "", NewValidationError(fieldName, msgRequired)
 	}
 
 	return trimmed, nil
@@ -75,7 +78,7 @@ func ValidateAbbreviation(abbr string) (string, error) {
 func ValidateSlug(slug string) (string, error) {
 	slug = strings.ToLower(strings.TrimSpace(slug))
 	if slug == "" {
-		return "", NewValidationError("slug", "is required")
+		return "", NewValidationError("slug", msgRequired)
 	}
 
 	return slug, nil

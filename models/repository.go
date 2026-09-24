@@ -130,15 +130,18 @@ func (r *Repository[T, ID]) Update(ctx context.Context, entity *T) error {
 	return nil
 }
 
-// Delete soft-deletes a record by its typed ID.
-func (r *Repository[T, ID]) Delete(ctx context.Context, id ID) error {
+// execByID runs a mutating query keyed by a typed ID. It validates the id,
+// invokes build against the write connection to produce the result, and maps the
+// outcome to WrapDBError / ErrNotFound / nil. It centralizes the guard and
+// result handling shared by Delete, Restore, and HardDelete.
+func (r *Repository[T, ID]) execByID(ctx context.Context, id ID, build func(db *gorm.DB, entity *T) *gorm.DB) error {
 	if err := ValidateUUID(string(id)); err != nil {
 		return err
 	}
 
 	var entity T
 
-	result := DBFrom(ctx, r.db).WithContext(ctx).Where("id = ?", string(id)).Delete(&entity)
+	result := build(DBFrom(ctx, r.db).WithContext(ctx), &entity)
 	if result.Error != nil {
 		return WrapDBError(result.Error)
 	}
@@ -150,47 +153,28 @@ func (r *Repository[T, ID]) Delete(ctx context.Context, id ID) error {
 	return nil
 }
 
+// Delete soft-deletes a record by its typed ID.
+func (r *Repository[T, ID]) Delete(ctx context.Context, id ID) error {
+	return r.execByID(ctx, id, func(db *gorm.DB, entity *T) *gorm.DB {
+		return db.Where("id = ?", string(id)).Delete(entity)
+	})
+}
+
 // Restore un-deletes a soft-deleted record.
 func (r *Repository[T, ID]) Restore(ctx context.Context, id ID) error {
-	if err := ValidateUUID(string(id)); err != nil {
-		return err
-	}
-
-	var entity T
-
-	result := DBFrom(ctx, r.db).WithContext(ctx).
-		Session(&gorm.Session{SkipHooks: true}).
-		Unscoped().Model(&entity).Where("id = ?", string(id)).Update("deleted_at", nil)
-	if result.Error != nil {
-		return WrapDBError(result.Error)
-	}
-
-	if result.RowsAffected == 0 {
-		return ErrNotFound
-	}
-
-	return nil
+	return r.execByID(ctx, id, func(db *gorm.DB, entity *T) *gorm.DB {
+		return db.
+			Session(&gorm.Session{SkipHooks: true}).
+			Unscoped().Model(entity).Where("id = ?", string(id)).Update("deleted_at", nil)
+	})
 }
 
 // HardDelete permanently removes a record from the database. Use with caution
 // — this operation is irreversible.
 func (r *Repository[T, ID]) HardDelete(ctx context.Context, id ID) error {
-	if err := ValidateUUID(string(id)); err != nil {
-		return err
-	}
-
-	var entity T
-
-	result := DBFrom(ctx, r.db).WithContext(ctx).Unscoped().Where("id = ?", string(id)).Delete(&entity)
-	if result.Error != nil {
-		return WrapDBError(result.Error)
-	}
-
-	if result.RowsAffected == 0 {
-		return ErrNotFound
-	}
-
-	return nil
+	return r.execByID(ctx, id, func(db *gorm.DB, entity *T) *gorm.DB {
+		return db.Unscoped().Where("id = ?", string(id)).Delete(entity)
+	})
 }
 
 // Count returns the number of records matching the query options.
@@ -293,18 +277,23 @@ func wrapValidationError(err error) (bool, error) {
 	return false, nil
 }
 
-// classifyConstraintError wraps msg with the sentinel matching the detected
+// classifyConstraintError wraps cause with the sentinel matching the detected
 // constraint kind: ErrDuplicateKey for a unique/primary-key violation,
 // ErrForeignKey for a foreign-key violation, and ErrDatabaseError otherwise. It
 // centralizes the three-way error construction shared by every driver matcher.
-func classifyConstraintError(unique, fk bool, msg string) error {
+//
+// cause is wrapped with %w (not flattened to a string) so the original driver or
+// stdlib error stays in the chain: callers can still errors.Is a
+// context.DeadlineExceeded / serialization failure or errors.As the concrete
+// *pgconn.PgError to decide whether a failed transaction is retryable.
+func classifyConstraintError(unique, fk bool, cause error) error {
 	switch {
 	case unique:
-		return fmt.Errorf("%w: %s", ErrDuplicateKey, msg)
+		return fmt.Errorf("%w: %w", ErrDuplicateKey, cause)
 	case fk:
-		return fmt.Errorf("%w: %s", ErrForeignKey, msg)
+		return fmt.Errorf("%w: %w", ErrForeignKey, cause)
 	default:
-		return fmt.Errorf("%w: %s", ErrDatabaseError, msg)
+		return fmt.Errorf("%w: %w", ErrDatabaseError, cause)
 	}
 }
 
@@ -319,7 +308,7 @@ func wrapPgError(err error) (bool, error) {
 	return true, classifyConstraintError(
 		pgErr.Code == pgCodeUniqueViolation,
 		pgErr.Code == pgCodeForeignKeyViolation,
-		pgErr.Message,
+		err,
 	)
 }
 
@@ -340,7 +329,7 @@ func wrapSqliteError(err error) (bool, error) {
 	return true, classifyConstraintError(
 		code == sqliteConstraintUnique || code == sqliteConstraintPrimaryKey,
 		code == sqliteConstraintForeignKey,
-		err.Error(),
+		err,
 	)
 }
 
@@ -361,7 +350,7 @@ func wrapByMessage(err error) error {
 		slog.Warn("models.WrapDBError: matched FK violation by string; driver error not unwrapped", "err", errStr)
 	}
 
-	return classifyConstraintError(unique, fk, errStr)
+	return classifyConstraintError(unique, fk, err)
 }
 
 // ValidateUUID checks if the given string is a valid UUID.

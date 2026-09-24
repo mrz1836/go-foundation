@@ -82,9 +82,7 @@ type TemporalEdge[ID ~string] struct {
 // explicitly-set ID, RecordedAt, or CreatedAt is preserved so replay tooling
 // can supply its own. ValidFrom is never defaulted.
 func (e *TemporalEdge[ID]) BeforeCreate(tx *gorm.DB) error {
-	if e.ID == "" {
-		e.ID = ID(NewID())
-	}
+	e.ID = mintID(e.ID)
 
 	if e.RecordedAt.IsZero() || e.CreatedAt.IsZero() {
 		ctx := tx.Statement.Context

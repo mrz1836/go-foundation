@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/mrz1836/go-foundation/ctxutil"
 	"github.com/mrz1836/go-foundation/models"
 )
 
@@ -152,7 +153,10 @@ func TestNopDBLogger_LogOperation(t *testing.T) {
 func TestGetRequestIDFromContext_WithValidRequestID(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.WithValue(context.Background(), models.RequestIDKey, "test-request-id-123")
+	// An id stamped via the canonical ctxutil key (as middleware.LoggingMiddleware
+	// does) must be visible through models.GetRequestIDFromContext. This is the
+	// cross-package correlation that the previous private-key implementation broke.
+	ctx := ctxutil.WithRequestID(context.Background(), "test-request-id-123")
 
 	result := models.GetRequestIDFromContext(ctx)
 
@@ -163,27 +167,6 @@ func TestGetRequestIDFromContext_WithoutRequestID(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-
-	result := models.GetRequestIDFromContext(ctx)
-
-	assert.Empty(t, result)
-}
-
-func TestGetRequestIDFromContext_WithNonStringValue(t *testing.T) {
-	t.Parallel()
-
-	// Test with a non-string value in context
-	ctx := context.WithValue(context.Background(), models.RequestIDKey, 12345)
-
-	result := models.GetRequestIDFromContext(ctx)
-
-	assert.Empty(t, result, "should return empty string for non-string values")
-}
-
-func TestGetRequestIDFromContext_WithNilValue(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.WithValue(context.Background(), models.RequestIDKey, nil)
 
 	result := models.GetRequestIDFromContext(ctx)
 

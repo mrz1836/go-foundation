@@ -23,7 +23,10 @@ func Exponential(base, maxDelay time.Duration, attempt int) time.Duration {
 	delay := base
 	for range attempt - 1 {
 		delay *= 2
-		if delay >= maxDelay {
+		// delay <= 0 catches int64 overflow from doubling a large base near a
+		// very high maxDelay: the wrapped-negative value would otherwise slip past
+		// the >= maxDelay check and be returned as a garbage delay.
+		if delay <= 0 || delay >= maxDelay {
 			return maxDelay
 		}
 	}

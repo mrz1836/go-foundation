@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -114,6 +115,39 @@ func TestAWSProvider_GetAllSecrets_InvalidJSON(t *testing.T) {
 
 	_, err := provider.GetAllSecrets(context.Background())
 	require.ErrorIs(t, err, secrets.ErrInvalidSecretFormat)
+}
+
+// TestAWSProvider_ConcurrentRefreshAndGet exercises Refresh concurrently with
+// GetAllSecrets/GetSecret. Under -race it guards against the data race that the
+// previous sync.Once-reassigning Refresh introduced.
+func TestAWSProvider_ConcurrentRefreshAndGet(t *testing.T) {
+	t.Parallel()
+
+	body := `{"SecretString":"{\"db_write_password\":\"pw\"}"}`
+	provider, _ := newStubbedAWSProvider(t, http.StatusOK, body)
+
+	const goroutines = 50
+
+	var wg sync.WaitGroup
+
+	wg.Add(goroutines)
+
+	for i := range goroutines {
+		go func(i int) {
+			defer wg.Done()
+
+			switch i % 3 {
+			case 0:
+				provider.Refresh()
+			case 1:
+				_, _ = provider.GetAllSecrets(context.Background())
+			default:
+				_, _ = provider.GetSecret(context.Background(), secrets.KeyDBWritePassword)
+			}
+		}(i)
+	}
+
+	wg.Wait()
 }
 
 func TestAWSProvider_GetAllSecrets_NullSecret(t *testing.T) {

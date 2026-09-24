@@ -24,10 +24,13 @@ type AWSProvider struct {
 	client    *secretsmanager.Client
 	secretARN string
 
-	// Cached secrets (populated on first access)
-	cache     map[string]string
-	cacheOnce sync.Once
-	cacheErr  error
+	// Cached secrets (populated on first access). All four fields below are
+	// guarded by mu so that Refresh can safely reset the cache concurrently with
+	// in-flight GetAllSecrets/GetSecret calls in a long-running process.
+	mu       sync.Mutex
+	loaded   bool
+	cache    map[string]string
+	cacheErr error
 }
 
 // NewAWSProvider creates a new AWS Secrets Manager provider.
@@ -82,9 +85,16 @@ func (p *AWSProvider) GetSecret(ctx context.Context, key string) (string, error)
 // GetAllSecrets retrieves all secrets from AWS Secrets Manager.
 // Results are cached in memory after the first call.
 func (p *AWSProvider) GetAllSecrets(ctx context.Context) (map[string]string, error) {
-	p.cacheOnce.Do(func() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// Fetch once and cache; subsequent calls reuse the cached result until
+	// Refresh clears it. The fetch runs under the lock so a concurrent Refresh
+	// cannot tear the cache mid-load.
+	if !p.loaded {
 		p.cache, p.cacheErr = p.fetchSecrets(ctx)
-	})
+		p.loaded = true
+	}
 
 	if p.cacheErr != nil {
 		return nil, p.cacheErr
@@ -102,7 +112,10 @@ func (p *AWSProvider) GetAllSecrets(ctx context.Context) (map[string]string, err
 // Refresh clears the cache and forces a refresh on the next GetSecret call.
 // This can be useful for long-running processes that need to pick up rotated secrets.
 func (p *AWSProvider) Refresh() {
-	p.cacheOnce = sync.Once{}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.loaded = false
 	p.cache = nil
 	p.cacheErr = nil
 }

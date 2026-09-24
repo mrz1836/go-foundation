@@ -35,9 +35,13 @@ var errUnsupportedDriver = errors.New("unsupported database driver")
 var configurePool = configureConnectionPool //nolint:gochecknoglobals // injectable seam for testing the pool-config failure branch
 
 // NewConnection creates a new GORM database connection based on the configuration.
-// It supports "sqlite" and "postgres" drivers.
-// Accepts any type that implements the DatabaseConfig interface.
-func NewConnection(cfg config.DatabaseConfig) (*gorm.DB, error) {
+// It supports "sqlite" and "postgres" drivers, and accepts any type that
+// implements the DatabaseConfig interface.
+//
+// Optional behaviors are opt-in via Option values (for example
+// WithSkipDefaultTransaction, WithPrepareStmt); passing none preserves GORM's
+// defaults, so existing callers are unaffected.
+func NewConnection(cfg config.DatabaseConfig, opts ...Option) (*gorm.DB, error) {
 	var dialector gorm.Dialector
 
 	switch cfg.GetDriver() {
@@ -49,8 +53,8 @@ func NewConnection(cfg config.DatabaseConfig) (*gorm.DB, error) {
 		return nil, fmt.Errorf("%w: %s", errUnsupportedDriver, cfg.GetDriver())
 	}
 
-	// Open connection
-	db, err := gorm.Open(dialector, &gorm.Config{})
+	// Open connection with the gorm.Config the resolved options describe.
+	db, err := gorm.Open(dialector, resolveOptions(opts).gormConfig())
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}

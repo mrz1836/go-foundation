@@ -28,11 +28,10 @@ func RequestIDToMetadata(base []byte, requestID string) []byte {
 		if err != nil {
 			return []byte("{}")
 		}
-		out := make([]byte, 0, len(v)+16)
-		out = append(out, `{"`...)
-		out = append(out, constants.FieldRequestID...)
-		out = append(out, `":`...)
-		out = append(out, v...)
+		// Build {"request_id":<v>} by appending onto a constant prefix. Growing via
+		// append (rather than a make cap of len(v)+N) keeps the size arithmetic out
+		// of user code, so there is no unchecked len-based capacity to overflow.
+		out := append([]byte(`{"`+constants.FieldRequestID+`":`), v...)
 		out = append(out, '}')
 		return out
 	}

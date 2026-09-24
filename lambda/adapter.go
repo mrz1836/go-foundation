@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -87,23 +86,22 @@ func (w *lambdaResponseWriter) toAPIGatewayResponse() events.APIGatewayV2HTTPRes
 		headers[k] = strings.Join(v, ",")
 	}
 
-	body := w.body.Bytes()
-	if utf8.Valid(body) {
-		return events.APIGatewayV2HTTPResponse{
-			StatusCode:      w.statusCode,
-			Headers:         headers,
-			Cookies:         cookies,
-			Body:            string(body),
-			IsBase64Encoded: false,
-		}
+	raw := w.body.Bytes()
+
+	body := string(raw)
+
+	isB64 := false
+	if !utf8.Valid(raw) {
+		body = base64.StdEncoding.EncodeToString(raw)
+		isB64 = true
 	}
 
 	return events.APIGatewayV2HTTPResponse{
 		StatusCode:      w.statusCode,
 		Headers:         headers,
 		Cookies:         cookies,
-		Body:            base64.StdEncoding.EncodeToString(body),
-		IsBase64Encoded: true,
+		Body:            body,
+		IsBase64Encoded: isB64,
 	}
 }
 
@@ -112,7 +110,7 @@ func (w *lambdaResponseWriter) toAPIGatewayResponse() events.APIGatewayV2HTTPRes
 // encoded binary bodies) are all faithfully translated. The API Gateway request
 // ID is preserved as X-Request-ID for downstream middleware.
 //
-//nolint:gocognit,gocyclo // HTTP request conversion requires multiple conditional branches
+//nolint:gocognit // HTTP request conversion requires multiple conditional branches
 func toHTTPRequest(ctx context.Context, event events.APIGatewayV2HTTPRequest) (*http.Request, error) {
 	rawPath := event.RawPath
 	if rawPath == "" {
@@ -122,11 +120,6 @@ func toHTTPRequest(ctx context.Context, event events.APIGatewayV2HTTPRequest) (*
 	rawURL := "https://lambda.local" + rawPath
 	if event.RawQueryString != "" {
 		rawURL += "?" + event.RawQueryString
-	}
-
-	parsedURL, err := url.Parse(rawURL)
-	if err != nil {
-		return nil, err
 	}
 
 	var bodyReader io.Reader
@@ -147,7 +140,9 @@ func toHTTPRequest(ctx context.Context, event events.APIGatewayV2HTTPRequest) (*
 		method = http.MethodGet
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, parsedURL.String(), bodyReader)
+	// NewRequestWithContext parses rawURL once (and reports a malformed URL as an
+	// error), so there is no need for a separate url.Parse round-trip.
+	req, err := http.NewRequestWithContext(ctx, method, rawURL, bodyReader)
 	if err != nil {
 		return nil, err
 	}

@@ -18,10 +18,27 @@ import (
 // the id from context into a row's metadata at enqueue time, and a consumer
 // reads it back with RequestIDFromMetadata across the storage boundary.
 func RequestIDToMetadata(base []byte, requestID string) []byte {
-	m := map[string]any{}
-	if len(base) > 0 {
-		_ = json.Unmarshal(base, &m)
+	// Fast path: with no base blob to merge, avoid the map round-trip entirely.
+	if len(base) == 0 {
+		if requestID == "" {
+			return []byte("{}")
+		}
+		// json.Marshal on the id gives the exact same escaping as the map path.
+		v, err := json.Marshal(requestID)
+		if err != nil {
+			return []byte("{}")
+		}
+		out := make([]byte, 0, len(v)+16)
+		out = append(out, `{"`...)
+		out = append(out, constants.FieldRequestID...)
+		out = append(out, `":`...)
+		out = append(out, v...)
+		out = append(out, '}')
+		return out
 	}
+
+	m := map[string]any{}
+	_ = json.Unmarshal(base, &m)
 	if requestID != "" {
 		m[constants.FieldRequestID] = requestID
 	}

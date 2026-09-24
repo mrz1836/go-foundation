@@ -122,6 +122,54 @@ func TestRequestIDFromMetadata(t *testing.T) {
 	}
 }
 
+// mapBasedToMetadata is the previous map round-trip implementation, kept as a
+// reference so the empty-base fast path can be proven byte-identical to it.
+func mapBasedToMetadata(base []byte, requestID string) []byte {
+	m := map[string]any{}
+	if len(base) > 0 {
+		_ = json.Unmarshal(base, &m)
+	}
+	if requestID != "" {
+		m["request_id"] = requestID
+	}
+	out, err := json.Marshal(m)
+	if err != nil || len(out) == 0 {
+		return []byte("{}")
+	}
+
+	return out
+}
+
+// TestRequestIDToMetadata_EmptyBaseFastPath asserts the empty-base fast path
+// produces byte-for-byte the same output as the map round-trip, including ids
+// that require JSON escaping.
+func TestRequestIDToMetadata_EmptyBaseFastPath(t *testing.T) {
+	t.Parallel()
+
+	ids := []string{
+		"req-1",
+		"",
+		`a"b`,
+		`a\b`,
+		"über-id-✓",
+		"with\nnewline",
+		"tab\tid",
+		"html<b>&amp;</b>",
+	}
+
+	for _, id := range ids {
+		t.Run(id, func(t *testing.T) {
+			t.Parallel()
+
+			for _, base := range [][]byte{nil, {}} {
+				got := ctxutil.RequestIDToMetadata(base, id)
+				want := mapBasedToMetadata(base, id)
+				assert.Equal(t, string(want), string(got))
+			}
+		})
+	}
+}
+
 // BenchmarkRequestIDToMetadata measures the JSON merge-and-marshal on the
 // request-id stamping (write) path.
 func BenchmarkRequestIDToMetadata(b *testing.B) {

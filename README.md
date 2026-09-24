@@ -114,6 +114,11 @@ naming. As the kit is assembled it exposes focused sub-packages:
 - **`cache`** — generic two-tier TTL cache for validating opaque secrets (bounded, DoS-guarded, injectable clock)
 - **`recurrence`** — DST-correct next-occurrence calculator for weekly recurring event patterns
 - **`backoff`** — exponential retry-delay ladder (base, doubling, capped)
+- **`crypto`** — auth primitives: HMAC/SHA-256 hashing, argon2id passwords, CSPRNG tokens (constant-time compares)
+- **`sliceutil`** — generic slice helpers (order-preserving dedupe, set intersection)
+- **`ptr`** — generic pointer helpers (`To`, `Deref`, `DerefOr`)
+- **`jsonpath`** — address values in a decoded-JSON tree via a small JSONPath subset
+- **`strtmpl`** — safe `{{name}}` placeholder substitution from layered value maps
 - **`models`** — generic `BaseModel`, `Repository`, `Clock`, and transaction helpers
 - **`secrets`** — pluggable secret providers (env, AWS, mock)
 - **`db`** — database connection helpers
@@ -279,9 +284,16 @@ Every benchmark in the module, linked to its source. The name links jump straigh
 | `cache` | [Parallel mixed](cache/cache_test.go#L937) | Concurrent hits + occasional costly-scan miss (lock-free scan) |
 | `cache` | [Eviction](cache/cache_test.go#L974) | Evicting the oldest ~10% of a full cache |
 | `config` | [Load from env](config/load_test.go#L298) | Reflection-based env binding into a config struct |
+| `crypto` | [SHA-256 hex](crypto/hmac_test.go#L74) | Deriving a cache key from an opaque token (16 / 256 / 4096 B) |
+| `crypto` | [HMAC hex](crypto/hmac_test.go#L90) | Keyed hash of a high-entropy secret (16 / 256 / 4096 B) |
+| `crypto` | [HMAC compare](crypto/hmac_test.go#L107) | Constant-time hex-tag comparison (equal path) |
+| `crypto` | [Hash password](crypto/password_test.go#L116) | argon2id hashing at cheap / default OWASP params (deliberately costly) |
+| `crypto` | [Verify password](crypto/password_test.go#L140) | argon2id decode + derive + constant-time compare |
+| `crypto` | [Random token](crypto/random_test.go#L108) | CSPRNG opaque-token mint (16 / 32 / 64 B) |
 | `ctxutil` | [Request ID → metadata](ctxutil/metadata_test.go#L175) | JSON merge + marshal on the request-id stamping path |
 | `ctxutil` | [Request ID ← metadata](ctxutil/metadata_test.go#L187) | JSON unmarshal on the request-id extraction path |
 | `httputil` | [Write JSON](httputil/httputil_test.go#L196) | Marshal + write of a JSON response body |
+| `jsonpath` | [Eval path](jsonpath/jsonpath_test.go#L63) | Addressing a value by dotted / indexed / bracketed path |
 | `lambda` | [API Gateway → net/http](lambda/adapter_test.go#L282) | Full request/response adapter round-trip |
 | `middleware` | [Logging · large 200](middleware/logging_test.go#L481) | Logging a large successful response body |
 | `middleware` | [Logging · request path](middleware/logging_test.go#L512) | Request/response log pair on the happy path |
@@ -291,9 +303,14 @@ Every benchmark in the module, linked to its source. The name links jump straigh
 | `models` | [Generate slug](models/slug_test.go#L83) | URL-slug transform (package-scoped regexes) |
 | `pagination` | [Encode cursor](pagination/pagination_test.go#L102) | Encoding a timestamp cursor |
 | `pagination` | [Decode cursor](pagination/pagination_test.go#L112) | Decoding a cursor string |
+| `ptr` | [To](ptr/ptr_test.go#L42) | Boxing a value into a pointer (stack-allocated when it does not escape) |
+| `ptr` | [Deref](ptr/ptr_test.go#L51) | Nil-safe dereference on the non-nil path |
 | `recurrence` | [Parse HH:MM](recurrence/recurrence_internal_test.go#L51) | Hand-rolled start-time parse (hot path) |
 | `recurrence` | [Parse pattern](recurrence/recurrence_internal_test.go#L60) | JSON decode of a recurrence pattern |
 | `recurrence` | [Next occurrence](recurrence/recurrence_internal_test.go#L72) | Full parse + next-occurrence computation |
+| `sliceutil` | [Dedupe](sliceutil/sliceutil_test.go#L69) | Order-preserving dedupe at 16 / 256 / 4096 elements |
+| `sliceutil` | [Intersect](sliceutil/sliceutil_test.go#L89) | Set intersection (full overlap) at 16 / 256 / 4096 elements |
+| `strtmpl` | [Render](strtmpl/strtmpl_test.go#L80) | `{{placeholder}}` substitution at 3 / 24 / 192 placeholders |
 
 ### Benchmark results
 
@@ -329,9 +346,20 @@ Absolute `ns/op` depends on the host, so treat the numbers below as a **point-in
 | Parallel mixed | 2,833 | 167 | 3 |
 | Eviction | 500,684 | 122,880 | 1 |
 | Load from env | 3,957 | 1,440 | 37 |
+| SHA-256 hex (16 B) | 106 | 128 | 2 |
+| SHA-256 hex (4096 B) | 2,195 | 4,224 | 3 |
+| HMAC hex (16 B) | 379 | 656 | 9 |
+| HMAC hex (4096 B) | 2,466 | 4,736 | 9 |
+| HMAC compare | 87.0 | 64 | 2 |
+| Hash password (cheap) | 5,281,773 | 8,391,656 | 25 |
+| Hash password (default OWASP) | 25,606,054 | 19,926,923 | 34 |
+| Verify password (cheap) | 5,044,210 | 8,391,575 | 27 |
+| Random token (32 B) | 309 | 128 | 3 |
 | Request ID → metadata | 903 | 593 | 16 |
 | Request ID ← metadata | 278 | 16 | 1 |
 | Write JSON | 783 | 1,129 | 15 |
+| Eval (dotted path) | 84.3 | 192 | 2 |
+| Eval (bracketed path) | 112 | 224 | 3 |
 | API Gateway → net/http | 688 | 1,448 | 15 |
 | Logging · large 200 | 510,092 | 10,493,183 | 22 |
 | Logging · request path | 3,234 | 6,295 | 24 |
@@ -341,9 +369,17 @@ Absolute `ns/op` depends on the host, so treat the numbers below as a **point-in
 | Generate slug | 1,812 | 518 | 15 |
 | Encode cursor | 16.8 | 16 | 1 |
 | Decode cursor | 22.8 | 16 | 1 |
+| Ptr.To | 0.32 | 0 | 0 |
+| Ptr.Deref | 0.32 | 0 | 0 |
 | Parse HH:MM | 24.0 | 0 | 0 |
 | Parse pattern | 329 | 48 | 1 |
 | Next occurrence | 395 | 48 | 1 |
+| Dedupe (16 elems) | 268 | 744 | 4 |
+| Dedupe (4096 elems) | 49,729 | 180,544 | 18 |
+| Intersect (16 elems) | 319 | 744 | 4 |
+| Intersect (4096 elems) | 72,090 | 180,544 | 18 |
+| Render (3 placeholders) | 457 | 32 | 3 |
+| Render (192 placeholders) | 28,526 | 1,551 | 9 |
 
 </details>
 

@@ -16,3 +16,14 @@ func NewID() string {
 
 	return id.String()
 }
+
+// mintID returns id unchanged when it is already set, otherwise a freshly minted
+// UUID v7. It centralizes the BeforeCreate contract shared by the model hooks:
+// an explicitly-supplied ID is preserved so replay tooling can provide its own.
+func mintID[ID ~string](id ID) ID {
+	if id == "" {
+		return ID(NewID())
+	}
+
+	return id
+}

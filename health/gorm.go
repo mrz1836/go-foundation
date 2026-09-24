@@ -10,6 +10,12 @@ import (
 	"github.com/mrz1836/go-foundation/config"
 )
 
+// Database role names used in ping labels, health output, and host lookup.
+const (
+	dbRoleWrite = "write"
+	dbRoleRead  = "read"
+)
+
 // GORMHealthChecker is the GORM-based implementation of HealthChecker.
 type GORMHealthChecker struct {
 	writeDB *gorm.DB
@@ -47,6 +53,11 @@ func NewGORMHealthChecker(writeDB *gorm.DB, cfg *config.Config, opts ...HealthCh
 }
 
 // SetReadDatabase sets the read database connection for health checking.
+//
+// Deprecated: prefer the WithReadDatabase construction option. This setter
+// mutates shared state without synchronization and is NOT safe to call
+// concurrently with Check/CheckWithDetails; use it only at construction time,
+// before the checker is shared across goroutines.
 func (h *GORMHealthChecker) SetReadDatabase(db *gorm.DB) {
 	h.readDB = db
 }
@@ -55,13 +66,13 @@ func (h *GORMHealthChecker) SetReadDatabase(db *gorm.DB) {
 // Returns an error if either database is unhealthy.
 func (h *GORMHealthChecker) Check(ctx context.Context) error {
 	// Check write database
-	if err := h.pingDatabase(ctx, h.writeDB, "write"); err != nil {
+	if err := h.pingDatabase(ctx, h.writeDB, dbRoleWrite); err != nil {
 		return err
 	}
 
 	// Check read database if configured and different from write
 	if h.readDB != nil && h.readDB != h.writeDB {
-		if err := h.pingDatabase(ctx, h.readDB, "read"); err != nil {
+		if err := h.pingDatabase(ctx, h.readDB, dbRoleRead); err != nil {
 			return err
 		}
 	}
@@ -83,7 +94,7 @@ func (h *GORMHealthChecker) CheckWithDetails(ctx context.Context) (*Status, erro
 	}
 
 	// Check write database
-	writeHealth := h.checkDatabaseHealth(ctx, h.writeDB, "write")
+	writeHealth := h.checkDatabaseHealth(ctx, h.writeDB, dbRoleWrite)
 
 	status.WriteDatabase = writeHealth
 	if !writeHealth.Connected {
@@ -115,7 +126,7 @@ func (h *GORMHealthChecker) getReadDatabaseHealth(ctx context.Context, writeHeal
 	}
 
 	// Separate read database - check its health
-	readHealth := h.checkDatabaseHealth(ctx, h.readDB, "read")
+	readHealth := h.checkDatabaseHealth(ctx, h.readDB, dbRoleRead)
 	if !readHealth.Connected && status.Status == StatusHealthy {
 		// Write healthy but read unhealthy = degraded
 		status.Status = StatusDegraded
@@ -149,9 +160,9 @@ func (h *GORMHealthChecker) checkDatabaseHealth(ctx context.Context, db *gorm.DB
 	// Get host from config if available
 	if h.cfg != nil {
 		switch name {
-		case "write":
+		case dbRoleWrite:
 			dbHealth.Host = h.cfg.WriteDatabase.Host
-		case "read":
+		case dbRoleRead:
 			dbHealth.Host = h.cfg.ReadDatabase.Host
 		}
 	}

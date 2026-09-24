@@ -13,6 +13,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/mrz1836/go-foundation/middleware"
 )
 
@@ -56,14 +59,10 @@ func parseLogEntry(t *testing.T, line []byte) logEntry {
 	t.Helper()
 
 	jsonStart := bytes.Index(line, []byte("{"))
-	if jsonStart == -1 {
-		t.Fatalf("no JSON object found in log line: %q", string(line))
-	}
+	require.NotEqual(t, -1, jsonStart, "no JSON object found in log line: %q", string(line))
 
 	var entry logEntry
-	if err := json.Unmarshal(line[jsonStart:], &entry); err != nil {
-		t.Fatalf("failed to parse log JSON: %v\nlog line: %s", err, string(line))
-	}
+	require.NoError(t, json.Unmarshal(line[jsonStart:], &entry), "failed to parse log JSON; log line: %s", string(line))
 
 	return entry
 }
@@ -71,41 +70,19 @@ func parseLogEntry(t *testing.T, line []byte) logEntry {
 func assertRequestEntry(t *testing.T, entry logEntry, wantRequestID, wantUserAgent, wantLevel string) {
 	t.Helper()
 
-	if entry.Type != "request" {
-		t.Errorf("type = %q, want 'request'", entry.Type)
-	}
-
-	if entry.RequestID != wantRequestID {
-		t.Errorf("request_id = %q, want %q", entry.RequestID, wantRequestID)
-	}
-
-	if entry.UserAgent != wantUserAgent {
-		t.Errorf("user_agent = %q, want %q", entry.UserAgent, wantUserAgent)
-	}
-
-	if entry.Level != wantLevel {
-		t.Errorf("level = %q, want %q", entry.Level, wantLevel)
-	}
+	assert.Equal(t, "request", entry.Type)
+	assert.Equal(t, wantRequestID, entry.RequestID)
+	assert.Equal(t, wantUserAgent, entry.UserAgent)
+	assert.Equal(t, wantLevel, entry.Level)
 }
 
 func assertResponseEntry(t *testing.T, entry logEntry, wantStatus int, wantLevel string) {
 	t.Helper()
 
-	if entry.Type != "response" {
-		t.Errorf("type = %q, want 'response'", entry.Type)
-	}
-
-	if entry.Status != wantStatus {
-		t.Errorf("status = %d, want %d", entry.Status, wantStatus)
-	}
-
-	if entry.Level != wantLevel {
-		t.Errorf("level = %q, want %q", entry.Level, wantLevel)
-	}
-
-	if entry.Latency < 0 {
-		t.Errorf("latency = %d, want >= 0", entry.Latency)
-	}
+	assert.Equal(t, "response", entry.Type)
+	assert.Equal(t, wantStatus, entry.Status)
+	assert.Equal(t, wantLevel, entry.Level)
+	assert.GreaterOrEqual(t, entry.Latency, int64(0))
 }
 
 func TestLoggingMiddleware_RequestResponse(t *testing.T) {
@@ -123,14 +100,10 @@ func TestLoggingMiddleware_RequestResponse(t *testing.T) {
 	rr := httptest.NewRecorder()
 	output := captureLogOutput(func() { mw.ServeHTTP(rr, req) })
 
-	if rr.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", rr.Code)
-	}
+	assert.Equal(t, http.StatusOK, rr.Code)
 
 	lines := bytes.Split([]byte(output), []byte("\n"))
-	if len(lines) < 2 {
-		t.Fatalf("expected at least 2 log lines, got %d\noutput: %s", len(lines), output)
-	}
+	require.GreaterOrEqual(t, len(lines), 2, "output: %s", output)
 
 	assertRequestEntry(t, parseLogEntry(t, lines[0]), "test-123", "curl/7.88.0", "INFO")
 	assertResponseEntry(t, parseLogEntry(t, lines[1]), http.StatusOK, "INFO")
@@ -152,18 +125,11 @@ func TestLoggingMiddleware_ClientError(t *testing.T) {
 	output := captureLogOutput(func() { mw.ServeHTTP(rr, req) })
 
 	lines := bytes.Split([]byte(output), []byte("\n"))
-	if len(lines) < 2 {
-		t.Fatalf("expected at least 2 log lines, got %d", len(lines))
-	}
+	require.GreaterOrEqual(t, len(lines), 2)
 
 	respEntry := parseLogEntry(t, lines[1])
-	if respEntry.Level != "WARN" {
-		t.Errorf("level = %q, want 'WARN'", respEntry.Level)
-	}
-
-	if respEntry.ErrorMessage != "resource not found" {
-		t.Errorf("error_message = %q, want 'resource not found'", respEntry.ErrorMessage)
-	}
+	assert.Equal(t, "WARN", respEntry.Level)
+	assert.Equal(t, "resource not found", respEntry.ErrorMessage)
 }
 
 func TestLoggingMiddleware_ServerError(t *testing.T) {
@@ -184,13 +150,8 @@ func TestLoggingMiddleware_ServerError(t *testing.T) {
 	lines := bytes.Split([]byte(output), []byte("\n"))
 	respEntry := parseLogEntry(t, lines[1])
 
-	if respEntry.Level != "ERROR" {
-		t.Errorf("level = %q, want 'ERROR'", respEntry.Level)
-	}
-
-	if respEntry.ErrorMessage != "database connection timeout" {
-		t.Errorf("error_message = %q, want 'database connection timeout'", respEntry.ErrorMessage)
-	}
+	assert.Equal(t, "ERROR", respEntry.Level)
+	assert.Equal(t, "database connection timeout", respEntry.ErrorMessage)
 }
 
 func TestLoggingMiddleware_LogInjectionPrevention(t *testing.T) {
@@ -209,26 +170,18 @@ func TestLoggingMiddleware_LogInjectionPrevention(t *testing.T) {
 	output := captureLogOutput(func() { mw.ServeHTTP(rr, req) })
 
 	lines := bytes.Split([]byte(output), []byte("\n"))
-	if len(lines) < 1 {
-		t.Fatal("expected at least 1 log line")
-	}
+	require.NotEmpty(t, lines)
 
 	entry := parseLogEntry(t, lines[0])
-	if entry.Path != maliciousPath {
-		t.Errorf("path = %q, want %q", entry.Path, maliciousPath)
-	}
+	assert.Equal(t, maliciousPath, entry.Path)
 
 	// Confirm no injected top-level key appeared
 	var raw map[string]any
 
 	jsonStart := bytes.Index(lines[0], []byte("{"))
-	if err := json.Unmarshal(lines[0][jsonStart:], &raw); err != nil {
-		t.Fatalf("log line is not valid JSON: %v", err)
-	}
+	require.NoError(t, json.Unmarshal(lines[0][jsonStart:], &raw), "log line is not valid JSON")
 
-	if _, ok := raw["injected"]; ok {
-		t.Error("log injection succeeded: 'injected' key found at top level")
-	}
+	assert.NotContains(t, raw, "injected", "log injection succeeded: 'injected' key found at top level")
 }
 
 func TestLoggingMiddleware_AmazonRequestIDFallback(t *testing.T) {
@@ -247,9 +200,7 @@ func TestLoggingMiddleware_AmazonRequestIDFallback(t *testing.T) {
 	lines := bytes.Split([]byte(output), []byte("\n"))
 
 	entry := parseLogEntry(t, lines[0])
-	if entry.RequestID != "amzn-req-xyz" {
-		t.Errorf("request_id = %q, want 'amzn-req-xyz'", entry.RequestID)
-	}
+	assert.Equal(t, "amzn-req-xyz", entry.RequestID)
 }
 
 func TestLoggingMiddleware_EmptyBodyWith4xx(t *testing.T) {
@@ -267,9 +218,7 @@ func TestLoggingMiddleware_EmptyBodyWith4xx(t *testing.T) {
 	lines := bytes.Split([]byte(output), []byte("\n"))
 
 	respEntry := parseLogEntry(t, lines[1])
-	if respEntry.ErrorMessage != "" {
-		t.Errorf("error_message = %q, want empty for empty body", respEntry.ErrorMessage)
-	}
+	assert.Empty(t, respEntry.ErrorMessage, "error_message should be empty for empty body")
 }
 
 func TestLoggingMiddleware_NonJSONBodyWith4xx(t *testing.T) {
@@ -287,9 +236,7 @@ func TestLoggingMiddleware_NonJSONBodyWith4xx(t *testing.T) {
 	lines := bytes.Split([]byte(output), []byte("\n"))
 
 	respEntry := parseLogEntry(t, lines[1])
-	if respEntry.ErrorMessage != "" {
-		t.Errorf("error_message = %q, want empty for non-JSON body", respEntry.ErrorMessage)
-	}
+	assert.Empty(t, respEntry.ErrorMessage, "error_message should be empty for non-JSON body")
 }
 
 func TestLoggingMiddleware_ErrorMessageKeyExtraction(t *testing.T) {
@@ -307,9 +254,7 @@ func TestLoggingMiddleware_ErrorMessageKeyExtraction(t *testing.T) {
 	lines := bytes.Split([]byte(output), []byte("\n"))
 
 	respEntry := parseLogEntry(t, lines[1])
-	if respEntry.ErrorMessage != "validation failed" {
-		t.Errorf("error_message = %q, want 'validation failed'", respEntry.ErrorMessage)
-	}
+	assert.Equal(t, "validation failed", respEntry.ErrorMessage)
 }
 
 func TestLoggingMiddleware_NonStringErrorValue(t *testing.T) {
@@ -327,9 +272,7 @@ func TestLoggingMiddleware_NonStringErrorValue(t *testing.T) {
 	lines := bytes.Split([]byte(output), []byte("\n"))
 
 	respEntry := parseLogEntry(t, lines[1])
-	if respEntry.ErrorMessage != "" {
-		t.Errorf("error_message = %q, want empty for non-string error value", respEntry.ErrorMessage)
-	}
+	assert.Empty(t, respEntry.ErrorMessage, "error_message should be empty for non-string error value")
 }
 
 func TestLoggingMiddleware_NoMatchingErrorKey(t *testing.T) {
@@ -347,9 +290,7 @@ func TestLoggingMiddleware_NoMatchingErrorKey(t *testing.T) {
 	lines := bytes.Split([]byte(output), []byte("\n"))
 
 	respEntry := parseLogEntry(t, lines[1])
-	if respEntry.ErrorMessage != "" {
-		t.Errorf("error_message = %q, want empty when no recognized key present", respEntry.ErrorMessage)
-	}
+	assert.Empty(t, respEntry.ErrorMessage, "error_message should be empty when no recognized key present")
 }
 
 func TestLoggingMiddleware_RequestIDInContext(t *testing.T) {
@@ -369,18 +310,14 @@ func TestLoggingMiddleware_RequestIDInContext(t *testing.T) {
 
 	captureLogOutput(func() { mw.ServeHTTP(rr, req) })
 
-	if capturedID != "ctx-req-id" {
-		t.Errorf("RequestIDFromContext = %q, want 'ctx-req-id'", capturedID)
-	}
+	assert.Equal(t, "ctx-req-id", capturedID)
 }
 
 func TestRequestIDFromContext_Empty(t *testing.T) {
 	t.Parallel()
 
 	id := middleware.RequestIDFromContext(context.Background())
-	if id != "" {
-		t.Errorf("RequestIDFromContext on empty context = %q, want empty", id)
-	}
+	assert.Empty(t, id, "RequestIDFromContext on empty context should be empty")
 }
 
 func TestLoggingMiddleware_DoubleWriteHeader(t *testing.T) {
@@ -397,17 +334,13 @@ func TestLoggingMiddleware_DoubleWriteHeader(t *testing.T) {
 	output := captureLogOutput(func() { mw.ServeHTTP(rr, req) })
 
 	// The actual response should be 400 (first WriteHeader wins)
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", rr.Code)
-	}
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
 
 	// The logged status should also be 400
 	lines := bytes.Split([]byte(output), []byte("\n"))
 
 	respEntry := parseLogEntry(t, lines[1])
-	if respEntry.Status != http.StatusBadRequest {
-		t.Errorf("logged status = %d, want 400", respEntry.Status)
-	}
+	assert.Equal(t, http.StatusBadRequest, respEntry.Status, "logged status should be 400")
 }
 
 func TestRecoverMiddleware_AmazonRequestIDFallback(t *testing.T) {
@@ -424,9 +357,7 @@ func TestRecoverMiddleware_AmazonRequestIDFallback(t *testing.T) {
 
 	output := captureLogOutput(func() { mw.ServeHTTP(rr, req) })
 
-	if rr.Code != http.StatusInternalServerError {
-		t.Errorf("status = %d, want 500", rr.Code)
-	}
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
 
 	var panicEntry struct {
 		RequestID string `json:"request_id"`
@@ -435,17 +366,11 @@ func TestRecoverMiddleware_AmazonRequestIDFallback(t *testing.T) {
 	lines := bytes.Split([]byte(output), []byte("\n"))
 
 	jsonStart := bytes.Index(lines[0], []byte("{"))
-	if jsonStart == -1 {
-		t.Fatalf("no JSON in panic log: %q", string(lines[0]))
-	}
+	require.NotEqual(t, -1, jsonStart, "no JSON in panic log: %q", string(lines[0]))
 
-	if err := json.Unmarshal(lines[0][jsonStart:], &panicEntry); err != nil {
-		t.Fatalf("unmarshal panic log: %v", err)
-	}
+	require.NoError(t, json.Unmarshal(lines[0][jsonStart:], &panicEntry), "unmarshal panic log")
 
-	if panicEntry.RequestID != "amzn-panic-id" {
-		t.Errorf("request_id = %q, want 'amzn-panic-id'", panicEntry.RequestID)
-	}
+	assert.Equal(t, "amzn-panic-id", panicEntry.RequestID)
 }
 
 func TestRecoverMiddleware_NoPanic(t *testing.T) {
@@ -459,9 +384,7 @@ func TestRecoverMiddleware_NoPanic(t *testing.T) {
 	rr := httptest.NewRecorder()
 	mw.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200", rr.Code)
-	}
+	assert.Equal(t, http.StatusOK, rr.Code)
 }
 
 func TestRecoverMiddleware_PanicReturns500(t *testing.T) {
@@ -477,13 +400,8 @@ func TestRecoverMiddleware_PanicReturns500(t *testing.T) {
 
 	output := captureLogOutput(func() { mw.ServeHTTP(rr, req) })
 
-	if rr.Code != http.StatusInternalServerError {
-		t.Errorf("status = %d, want 500", rr.Code)
-	}
-
-	if ct := rr.Header().Get("Content-Type"); ct != "application/json" {
-		t.Errorf("Content-Type = %q, want application/json", ct)
-	}
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+	assert.Equal(t, "application/json", rr.Header().Get("Content-Type"))
 
 	// Confirm structured panic log was written
 	var panicEntry struct {
@@ -497,29 +415,14 @@ func TestRecoverMiddleware_PanicReturns500(t *testing.T) {
 	lines := bytes.Split([]byte(output), []byte("\n"))
 
 	jsonStart := bytes.Index(lines[0], []byte("{"))
-	if jsonStart == -1 {
-		t.Fatalf("no JSON in panic log: %q", string(lines[0]))
-	}
+	require.NotEqual(t, -1, jsonStart, "no JSON in panic log: %q", string(lines[0]))
 
-	if err := json.Unmarshal(lines[0][jsonStart:], &panicEntry); err != nil {
-		t.Fatalf("unmarshal panic log: %v", err)
-	}
+	require.NoError(t, json.Unmarshal(lines[0][jsonStart:], &panicEntry), "unmarshal panic log")
 
-	if panicEntry.Level != "ERROR" {
-		t.Errorf("level = %q, want 'ERROR'", panicEntry.Level)
-	}
-
-	if panicEntry.Type != "panic" {
-		t.Errorf("type = %q, want 'panic'", panicEntry.Type)
-	}
-
-	if panicEntry.RequestID != "panic-req-id" {
-		t.Errorf("request_id = %q, want 'panic-req-id'", panicEntry.RequestID)
-	}
-
-	if panicEntry.Stack == "" {
-		t.Error("stack should be non-empty")
-	}
+	assert.Equal(t, "ERROR", panicEntry.Level)
+	assert.Equal(t, "panic", panicEntry.Type)
+	assert.Equal(t, "panic-req-id", panicEntry.RequestID)
+	assert.NotEmpty(t, panicEntry.Stack, "stack should be non-empty")
 }
 
 func TestLoggingMiddleware_Unwrap(t *testing.T) {
@@ -541,13 +444,8 @@ func TestLoggingMiddleware_Unwrap(t *testing.T) {
 
 	captureLogOutput(func() { mw.ServeHTTP(rr, req) })
 
-	if flushErr != nil {
-		t.Errorf("Flush via ResponseController = %v, want nil (Unwrap must expose inner writer)", flushErr)
-	}
-
-	if !rr.Flushed {
-		t.Error("recorder was not flushed; Unwrap did not reach the inner http.Flusher")
-	}
+	require.NoError(t, flushErr, "Flush via ResponseController should be nil (Unwrap must expose inner writer)")
+	assert.True(t, rr.Flushed, "recorder was not flushed; Unwrap did not reach the inner http.Flusher")
 }
 
 func TestLoggingMiddleware_ErrorBodyTruncated(t *testing.T) {
@@ -569,22 +467,15 @@ func TestLoggingMiddleware_ErrorBodyTruncated(t *testing.T) {
 	output := captureLogOutput(func() { mw.ServeHTTP(rr, req) })
 
 	// The full body is still written downstream to the client.
-	if rr.Body.Len() != len(bigBody) {
-		t.Errorf("client body length = %d, want %d (downstream write must be intact)", rr.Body.Len(), len(bigBody))
-	}
+	assert.Equal(t, len(bigBody), rr.Body.Len(), "downstream write must be intact")
 
 	// The captured (truncated) body is not valid JSON, so extractErrorMessage
 	// returns "" — confirming only the first 4096 bytes were retained.
 	lines := bytes.Split([]byte(output), []byte("\n"))
 
 	respEntry := parseLogEntry(t, lines[1])
-	if respEntry.Status != http.StatusInternalServerError {
-		t.Errorf("status = %d, want 500", respEntry.Status)
-	}
-
-	if respEntry.ErrorMessage != "" {
-		t.Errorf("error_message = %q, want empty (truncated body is not valid JSON)", respEntry.ErrorMessage)
-	}
+	assert.Equal(t, http.StatusInternalServerError, respEntry.Status)
+	assert.Empty(t, respEntry.ErrorMessage, "error_message should be empty (truncated body is not valid JSON)")
 }
 
 func BenchmarkLoggingMiddleware_LargeResponse200(b *testing.B) {

@@ -77,3 +77,13 @@ func TestGenerateSlug(t *testing.T) {
 		})
 	}
 }
+
+// BenchmarkGenerateSlug measures the slug transform. The regexes are compiled
+// once at package scope, so this stays on the fast path.
+func BenchmarkGenerateSlug(b *testing.B) {
+	b.ReportAllocs()
+
+	for range b.N {
+		_ = models.GenerateSlug("Hello, World! This_is a Test — Slug 123")
+	}
+}

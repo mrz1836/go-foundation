@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mrz1836/go-foundation/constants"
 	"github.com/mrz1836/go-foundation/ctxutil"
 )
 
@@ -29,11 +30,11 @@ func RequestIDFromContext(ctx context.Context) string {
 // requestID extracts the request ID from the request headers.
 // It checks X-Request-ID first, then falls back to X-Amzn-Request-Id.
 func requestID(r *http.Request) string {
-	if id := r.Header.Get("X-Request-ID"); id != "" {
+	if id := r.Header.Get(constants.HeaderXRequestID); id != "" {
 		return id
 	}
 
-	return r.Header.Get("X-Amzn-Request-Id")
+	return r.Header.Get(constants.HeaderXAmznRequestID)
 }
 
 // responseWriter wraps http.ResponseWriter to capture the status code and
@@ -98,10 +99,12 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 		ctx := ctxutil.WithRequestID(r.Context(), reqID)
 		r = r.WithContext(ctx)
 
-		slog.Info(
+		slog.LogAttrs(
+			ctx,
+			slog.LevelInfo,
 			"Request started",
 			slog.String("type", "request"),
-			slog.String("request_id", reqID),
+			slog.String(constants.FieldRequestID, reqID),
 			slog.String("method", r.Method),
 			slog.String("path", r.URL.Path),
 			slog.String("source_ip", r.RemoteAddr),
@@ -124,22 +127,23 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 			level = slog.LevelWarn
 		}
 
-		args := []any{
+		attrs := make([]slog.Attr, 0, 7)
+		attrs = append(attrs,
 			slog.String("type", "response"),
-			slog.String("request_id", reqID),
+			slog.String(constants.FieldRequestID, reqID),
 			slog.String("method", r.Method),
 			slog.String("path", r.URL.Path),
 			slog.Int("status", wrapped.statusCode),
 			slog.Int64("latency", latency),
-		}
+		)
 		if wrapped.statusCode >= http.StatusBadRequest {
 			errStr := extractErrorMessage(wrapped.body.String())
 			if errStr != "" {
-				args = append(args, slog.String("error_message", errStr))
+				attrs = append(attrs, slog.String("error_message", errStr))
 			}
 		}
 
-		slog.Log(ctx, level, "Request completed", args...)
+		slog.LogAttrs(ctx, level, "Request completed", attrs...)
 	})
 }
 

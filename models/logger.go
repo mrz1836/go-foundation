@@ -4,6 +4,9 @@ import (
 	"context"
 	"log/slog"
 	"time"
+
+	"github.com/mrz1836/go-foundation/constants"
+	"github.com/mrz1836/go-foundation/ctxutil"
 )
 
 // DBLogger defines an interface for database operation logging.
@@ -69,7 +72,7 @@ func (l *DefaultDBLogger) LogOperation(ctx context.Context, op DBOperation) {
 	}
 
 	if op.RequestID != "" {
-		attrs = append(attrs, slog.String("request_id", op.RequestID))
+		attrs = append(attrs, slog.String(constants.FieldRequestID, op.RequestID))
 	}
 
 	level := slog.LevelInfo
@@ -93,18 +96,24 @@ func (l *NopDBLogger) LogOperation(_ context.Context, _ DBOperation) {
 }
 
 // ContextKey type for context values.
+//
+// Deprecated: request-id propagation uses the unexported key in package ctxutil
+// (see ctxutil.WithRequestID / ctxutil.RequestIDFrom). This type is retained
+// only for backward compatibility and is no longer read by
+// GetRequestIDFromContext.
 type contextKey string
 
 // RequestIDKey is the context key for request ID.
+//
+// Deprecated: stamp the request id with ctxutil.WithRequestID and read it with
+// ctxutil.RequestIDFrom (or GetRequestIDFromContext). This key is no longer
+// consulted by GetRequestIDFromContext, so values stored under it will not be
+// found.
 const RequestIDKey contextKey = "request_id"
 
-// GetRequestIDFromContext extracts the request ID from context for log correlation.
+// GetRequestIDFromContext extracts the request ID from context for log
+// correlation. It reads the canonical ctxutil request-id key, so an id stamped
+// by middleware.LoggingMiddleware (via ctxutil.WithRequestID) is visible here.
 func GetRequestIDFromContext(ctx context.Context) string {
-	if v := ctx.Value(RequestIDKey); v != nil {
-		if s, ok := v.(string); ok {
-			return s
-		}
-	}
-
-	return ""
+	return ctxutil.RequestIDFrom(ctx)
 }

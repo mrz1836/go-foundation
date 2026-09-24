@@ -1,6 +1,10 @@
 package ctxutil
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/mrz1836/go-foundation/constants"
+)
 
 // RequestIDToMetadata returns a JSON object blob (always non-empty) carrying the
 // request id under the "request_id" key. base, when non-empty, is merged in
@@ -14,12 +18,28 @@ import "encoding/json"
 // the id from context into a row's metadata at enqueue time, and a consumer
 // reads it back with RequestIDFromMetadata across the storage boundary.
 func RequestIDToMetadata(base []byte, requestID string) []byte {
-	m := map[string]any{}
-	if len(base) > 0 {
-		_ = json.Unmarshal(base, &m)
+	// Fast path: with no base blob to merge, avoid the map round-trip entirely.
+	if len(base) == 0 {
+		if requestID == "" {
+			return []byte("{}")
+		}
+		// json.Marshal on the id gives the exact same escaping as the map path.
+		v, err := json.Marshal(requestID)
+		if err != nil {
+			return []byte("{}")
+		}
+		// Build {"request_id":<v>} by appending onto a constant prefix. Growing via
+		// append (rather than a make cap of len(v)+N) keeps the size arithmetic out
+		// of user code, so there is no unchecked len-based capacity to overflow.
+		out := append([]byte(`{"`+constants.FieldRequestID+`":`), v...)
+		out = append(out, '}')
+		return out
 	}
+
+	m := map[string]any{}
+	_ = json.Unmarshal(base, &m)
 	if requestID != "" {
-		m["request_id"] = requestID
+		m[constants.FieldRequestID] = requestID
 	}
 	out, err := json.Marshal(m)
 	if err != nil || len(out) == 0 {
@@ -36,6 +56,8 @@ func RequestIDFromMetadata(raw []byte) string {
 	if len(raw) == 0 {
 		return ""
 	}
+	// The struct tag must stay a literal (Go tags cannot reference a constant);
+	// it must match constants.FieldRequestID.
 	var m struct {
 		RequestID string `json:"request_id"`
 	}

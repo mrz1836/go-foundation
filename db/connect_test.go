@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
 	"github.com/mrz1836/go-foundation/config"
@@ -27,29 +29,19 @@ func TestNewConnection_SQLite(t *testing.T) {
 
 	// Execute
 	db, err := NewConnection(cfg)
-	if err != nil {
-		t.Fatalf("Failed to connect to SQLite: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Verify
 	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatalf("Failed to get underlying DB: %v", err)
-	}
+	require.NoError(t, err)
 	defer func() {
-		if err := sqlDB.Close(); err != nil {
-			t.Errorf("Failed to close DB: %v", err)
-		}
+		assert.NoError(t, sqlDB.Close())
 	}()
 
-	if err := sqlDB.Ping(); err != nil {
-		t.Errorf("Failed to ping SQLite DB: %v", err)
-	}
+	assert.NoError(t, sqlDB.Ping())
 
 	// Cleanup
-	if err := os.Remove(dbName); err != nil {
-		t.Errorf("Failed to remove test DB: %v", err)
-	}
+	assert.NoError(t, os.Remove(dbName))
 }
 
 func TestNewConnection_SQLiteWithConnectionPool(t *testing.T) {
@@ -66,30 +58,20 @@ func TestNewConnection_SQLiteWithConnectionPool(t *testing.T) {
 
 	// Execute
 	db, err := NewConnection(cfg)
-	if err != nil {
-		t.Fatalf("Failed to connect to SQLite: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Verify connection pool settings were applied
 	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatalf("Failed to get underlying DB: %v", err)
-	}
+	require.NoError(t, err)
 	defer func() {
-		if err := sqlDB.Close(); err != nil {
-			t.Errorf("Failed to close DB: %v", err)
-		}
+		assert.NoError(t, sqlDB.Close())
 	}()
 
 	// Verify the connection works
-	if err := sqlDB.Ping(); err != nil {
-		t.Errorf("Failed to ping SQLite DB: %v", err)
-	}
+	assert.NoError(t, sqlDB.Ping())
 
 	// Cleanup
-	if err := os.Remove(dbName); err != nil {
-		t.Errorf("Failed to remove test DB: %v", err)
-	}
+	assert.NoError(t, os.Remove(dbName))
 }
 
 func TestNewConnection_UnsupportedDriver(t *testing.T) {
@@ -101,17 +83,8 @@ func TestNewConnection_UnsupportedDriver(t *testing.T) {
 
 	db, err := NewConnection(cfg)
 
-	if db != nil {
-		t.Error("Expected nil db for unsupported driver")
-	}
-
-	if err == nil {
-		t.Fatal("Expected error for unsupported driver")
-	}
-
-	if !errors.Is(err, errUnsupportedDriver) {
-		t.Errorf("Expected errUnsupportedDriver, got: %v", err)
-	}
+	assert.Nil(t, db, "expected nil db for unsupported driver")
+	require.ErrorIs(t, err, errUnsupportedDriver)
 }
 
 func TestNewConnection_EmptyDriverDefaultsToPostgres(t *testing.T) {
@@ -133,9 +106,8 @@ func TestNewConnection_EmptyDriverDefaultsToPostgres(t *testing.T) {
 	_, err := NewConnection(cfg)
 
 	// We expect a connection error, not an unsupported driver error
-	if err != nil && errors.Is(err, errUnsupportedDriver) {
-		t.Error("Empty driver should default to postgres, not return unsupported driver error")
-	}
+	assert.NotErrorIs(t, err, errUnsupportedDriver,
+		"empty driver should default to postgres, not return unsupported driver error")
 	// Connection will fail, but that's expected - we just want to verify driver selection
 }
 
@@ -149,9 +121,7 @@ func TestCreateSQLiteDialector_WithEmptyDatabase(t *testing.T) {
 
 	dialector := createSQLiteDialector(cfg)
 
-	if dialector == nil {
-		t.Fatal("Expected non-nil dialector")
-	}
+	require.NotNil(t, dialector)
 	// The dialector is created; it will use "foundation.db" as the default
 }
 
@@ -165,9 +135,7 @@ func TestCreateSQLiteDialector_WithCustomDatabase(t *testing.T) {
 
 	dialector := createSQLiteDialector(cfg)
 
-	if dialector == nil {
-		t.Fatal("Expected non-nil dialector")
-	}
+	require.NotNil(t, dialector)
 }
 
 func TestCreatePostgresDialector(t *testing.T) {
@@ -185,9 +153,7 @@ func TestCreatePostgresDialector(t *testing.T) {
 
 	dialector := createPostgresDialector(cfg)
 
-	if dialector == nil {
-		t.Fatal("Expected non-nil dialector")
-	}
+	require.NotNil(t, dialector)
 }
 
 func TestCreatePostgresDialector_WithoutPassword(t *testing.T) {
@@ -204,9 +170,7 @@ func TestCreatePostgresDialector_WithoutPassword(t *testing.T) {
 
 	dialector := createPostgresDialector(cfg)
 
-	if dialector == nil {
-		t.Fatal("Expected non-nil dialector")
-	}
+	require.NotNil(t, dialector)
 }
 
 func TestConfigureConnectionPool_WithMaxOpenConns(t *testing.T) {
@@ -222,29 +186,18 @@ func TestConfigureConnectionPool_WithMaxOpenConns(t *testing.T) {
 	}
 
 	db, err := NewConnection(cfg)
-	if err != nil {
-		t.Fatalf("Failed to connect: %v", err)
-	}
+	require.NoError(t, err)
 
 	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatalf("Failed to get underlying DB: %v", err)
-	}
+	require.NoError(t, err)
 	defer func() {
-		if err := sqlDB.Close(); err != nil {
-			t.Errorf("Failed to close DB: %v", err)
-		}
-
-		if err := os.Remove(dbName); err != nil {
-			t.Errorf("Failed to remove test DB: %v", err)
-		}
+		assert.NoError(t, sqlDB.Close())
+		assert.NoError(t, os.Remove(dbName))
 	}()
 
 	// Verify pool was configured (MaxOpenConns should be set)
 	stats := sqlDB.Stats()
-	if stats.MaxOpenConnections != 25 {
-		t.Errorf("Expected MaxOpenConnections=25, got %d", stats.MaxOpenConnections)
-	}
+	assert.Equal(t, 25, stats.MaxOpenConnections)
 }
 
 func TestConfigureConnectionPool_WithMaxIdleConns(t *testing.T) {
@@ -260,28 +213,17 @@ func TestConfigureConnectionPool_WithMaxIdleConns(t *testing.T) {
 	}
 
 	db, err := NewConnection(cfg)
-	if err != nil {
-		t.Fatalf("Failed to connect: %v", err)
-	}
+	require.NoError(t, err)
 
 	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatalf("Failed to get underlying DB: %v", err)
-	}
+	require.NoError(t, err)
 	defer func() {
-		if err := sqlDB.Close(); err != nil {
-			t.Errorf("Failed to close DB: %v", err)
-		}
-
-		if err := os.Remove(dbName); err != nil {
-			t.Errorf("Failed to remove test DB: %v", err)
-		}
+		assert.NoError(t, sqlDB.Close())
+		assert.NoError(t, os.Remove(dbName))
 	}()
 
 	// Connection should work even with only idle conns set
-	if err := sqlDB.Ping(); err != nil {
-		t.Errorf("Failed to ping: %v", err)
-	}
+	assert.NoError(t, sqlDB.Ping())
 }
 
 func TestConfigureConnectionPool_WithBothSettings(t *testing.T) {
@@ -297,28 +239,17 @@ func TestConfigureConnectionPool_WithBothSettings(t *testing.T) {
 	}
 
 	db, err := NewConnection(cfg)
-	if err != nil {
-		t.Fatalf("Failed to connect: %v", err)
-	}
+	require.NoError(t, err)
 
 	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatalf("Failed to get underlying DB: %v", err)
-	}
+	require.NoError(t, err)
 	defer func() {
-		if err := sqlDB.Close(); err != nil {
-			t.Errorf("Failed to close DB: %v", err)
-		}
-
-		if err := os.Remove(dbName); err != nil {
-			t.Errorf("Failed to remove test DB: %v", err)
-		}
+		assert.NoError(t, sqlDB.Close())
+		assert.NoError(t, os.Remove(dbName))
 	}()
 
 	stats := sqlDB.Stats()
-	if stats.MaxOpenConnections != 50 {
-		t.Errorf("Expected MaxOpenConnections=50, got %d", stats.MaxOpenConnections)
-	}
+	assert.Equal(t, 50, stats.MaxOpenConnections)
 }
 
 func TestConfigureConnectionPool_WithZeroValues(t *testing.T) {
@@ -334,34 +265,21 @@ func TestConfigureConnectionPool_WithZeroValues(t *testing.T) {
 	}
 
 	db, err := NewConnection(cfg)
-	if err != nil {
-		t.Fatalf("Failed to connect: %v", err)
-	}
+	require.NoError(t, err)
 
 	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatalf("Failed to get underlying DB: %v", err)
-	}
+	require.NoError(t, err)
 	defer func() {
-		if err := sqlDB.Close(); err != nil {
-			t.Errorf("Failed to close DB: %v", err)
-		}
-
-		if err := os.Remove(dbName); err != nil {
-			t.Errorf("Failed to remove test DB: %v", err)
-		}
+		assert.NoError(t, sqlDB.Close())
+		assert.NoError(t, os.Remove(dbName))
 	}()
 
 	// Connection should work with default pool settings
-	if err := sqlDB.Ping(); err != nil {
-		t.Errorf("Failed to ping: %v", err)
-	}
+	require.NoError(t, sqlDB.Ping())
 
 	// Verify sensible defaults were applied
 	stats := sqlDB.Stats()
-	if stats.MaxOpenConnections != defaultMaxOpenConns {
-		t.Errorf("Expected MaxOpenConnections=%d (default), got %d", defaultMaxOpenConns, stats.MaxOpenConnections)
-	}
+	assert.Equal(t, defaultMaxOpenConns, stats.MaxOpenConnections)
 }
 
 func TestConfigureConnectionPool_ConnMaxLifetime(t *testing.T) {
@@ -376,34 +294,21 @@ func TestConfigureConnectionPool_ConnMaxLifetime(t *testing.T) {
 	}
 
 	db, err := NewConnection(cfg)
-	if err != nil {
-		t.Fatalf("Failed to connect: %v", err)
-	}
+	require.NoError(t, err)
 
 	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatalf("Failed to get underlying DB: %v", err)
-	}
+	require.NoError(t, err)
 	defer func() {
-		if err := sqlDB.Close(); err != nil {
-			t.Errorf("Failed to close DB: %v", err)
-		}
-
-		if err := os.Remove(dbName); err != nil {
-			t.Errorf("Failed to remove test DB: %v", err)
-		}
+		assert.NoError(t, sqlDB.Close())
+		assert.NoError(t, os.Remove(dbName))
 	}()
 
 	// ConnMaxLifetime is not exposed via stats, but we can verify it was set
 	// by checking the connection works and default max open conns were applied
-	if err := sqlDB.Ping(); err != nil {
-		t.Errorf("Failed to ping: %v", err)
-	}
+	require.NoError(t, sqlDB.Ping())
 
 	stats := sqlDB.Stats()
-	if stats.MaxOpenConnections != defaultMaxOpenConns {
-		t.Errorf("Expected MaxOpenConnections=%d (default), got %d", defaultMaxOpenConns, stats.MaxOpenConnections)
-	}
+	assert.Equal(t, defaultMaxOpenConns, stats.MaxOpenConnections)
 }
 
 func TestConfigureConnectionPool_DefaultConnMaxLifetime(t *testing.T) {
@@ -418,27 +323,16 @@ func TestConfigureConnectionPool_DefaultConnMaxLifetime(t *testing.T) {
 	}
 
 	db, err := NewConnection(cfg)
-	if err != nil {
-		t.Fatalf("Failed to connect: %v", err)
-	}
+	require.NoError(t, err)
 
 	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatalf("Failed to get underlying DB: %v", err)
-	}
+	require.NoError(t, err)
 	defer func() {
-		if err := sqlDB.Close(); err != nil {
-			t.Errorf("Failed to close DB: %v", err)
-		}
-
-		if err := os.Remove(dbName); err != nil {
-			t.Errorf("Failed to remove test DB: %v", err)
-		}
+		assert.NoError(t, sqlDB.Close())
+		assert.NoError(t, os.Remove(dbName))
 	}()
 
-	if err := sqlDB.Ping(); err != nil {
-		t.Errorf("Failed to ping: %v", err)
-	}
+	assert.NoError(t, sqlDB.Ping())
 
 	// Stats.MaxLifetimeClosed is available only when conns expire,
 	// but we can at least verify the connection is functional with defaults.
@@ -454,13 +348,7 @@ func TestConfigureConnectionPool_UnderlyingDBError(t *testing.T) {
 	cfg := &config.WriteDatabaseConfig{Driver: driverSQLite, Database: ":memory:"}
 
 	err := configureConnectionPool(&gorm.DB{Config: &gorm.Config{}}, cfg)
-	if err == nil {
-		t.Fatal("expected an error when the underlying sql.DB is unavailable")
-	}
-
-	if !errors.Is(err, gorm.ErrInvalidDB) {
-		t.Errorf("error = %v, want it to wrap gorm.ErrInvalidDB", err)
-	}
+	require.ErrorIs(t, err, gorm.ErrInvalidDB)
 }
 
 // TestNewConnection_ConfigurePoolError verifies that NewConnection surfaces an
@@ -482,11 +370,6 @@ func TestNewConnection_ConfigurePoolError(t *testing.T) {
 	t.Cleanup(func() { _ = os.Remove(dbName) })
 
 	db, err := NewConnection(cfg)
-	if db != nil {
-		t.Error("expected nil db when pool configuration fails")
-	}
-
-	if !errors.Is(err, poolErr) {
-		t.Errorf("error = %v, want it to wrap poolErr", err)
-	}
+	assert.Nil(t, db, "expected nil db when pool configuration fails")
+	require.ErrorIs(t, err, poolErr)
 }

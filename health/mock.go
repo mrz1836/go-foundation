@@ -6,6 +6,20 @@ import (
 	"time"
 )
 
+// driverMock is the driver name reported by the mock health checker.
+const driverMock = "mock"
+
+// mockDBHealth builds a DatabaseHealth with the mock driver, centralizing the
+// literal shared by the mock's healthy and unhealthy responses.
+func mockDBHealth(connected bool, latency time.Duration, errMsg string) *DatabaseHealth {
+	return &DatabaseHealth{
+		Connected: connected,
+		Driver:    driverMock,
+		Latency:   latency,
+		Error:     errMsg,
+	}
+}
+
 // MockHealthChecker is a mock implementation of Checker for testing.
 type MockHealthChecker struct {
 	// CheckFunc is called by Check if set.
@@ -33,20 +47,10 @@ func NewUnhealthyMock(errMsg string) *MockHealthChecker {
 		},
 		CheckWithDetailsFunc: func(_ context.Context) (*Status, error) {
 			return &Status{
-				Status:    StatusUnhealthy,
-				Timestamp: time.Now(),
-				WriteDatabase: &DatabaseHealth{
-					Connected: false,
-					Driver:    "mock",
-					Latency:   0,
-					Error:     errMsg,
-				},
-				ReadDatabase: &DatabaseHealth{
-					Connected: false,
-					Driver:    "mock",
-					Latency:   0,
-					Error:     errMsg,
-				},
+				Status:        StatusUnhealthy,
+				Timestamp:     time.Now(),
+				WriteDatabase: mockDBHealth(false, 0, errMsg),
+				ReadDatabase:  mockDBHealth(false, 0, errMsg),
 			}, nil
 		},
 	}
@@ -72,18 +76,10 @@ func (m *MockHealthChecker) CheckWithDetails(ctx context.Context) (*Status, erro
 	}
 
 	return &Status{
-		Status:    StatusHealthy,
-		Timestamp: time.Now(),
-		WriteDatabase: &DatabaseHealth{
-			Connected: true,
-			Driver:    "mock",
-			Latency:   time.Millisecond,
-		},
-		ReadDatabase: &DatabaseHealth{
-			Connected: true,
-			Driver:    "mock",
-			Latency:   time.Millisecond,
-		},
+		Status:        StatusHealthy,
+		Timestamp:     time.Now(),
+		WriteDatabase: mockDBHealth(true, time.Millisecond, ""),
+		ReadDatabase:  mockDBHealth(true, time.Millisecond, ""),
 	}, nil
 }
 

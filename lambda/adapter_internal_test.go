@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/aws/aws-lambda-go/events"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/mrz1836/go-foundation/constants"
 )
@@ -42,20 +44,11 @@ func TestServeHTTP_MarshalFallback(t *testing.T) {
 	resp, err := ServeHTTP(context.Background(), event, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
-	if err == nil {
-		t.Fatal("expected error from ServeHTTP on invalid base64 body, got nil")
-	}
+	require.Error(t, err, "expected error from ServeHTTP on invalid base64 body")
 
-	if resp.StatusCode != http.StatusInternalServerError {
-		t.Errorf("StatusCode = %d, want 500", resp.StatusCode)
-	}
+	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
 
 	want := `{"error":"` + constants.ErrorMessageInternalError + `","code":"` + constants.ErrorCodeInternalError + `"}`
-	if resp.Body != want {
-		t.Errorf("Body = %q, want static fallback %q", resp.Body, want)
-	}
-
-	if resp.Headers[constants.HeaderContentType] != constants.ContentTypeJSON {
-		t.Errorf("Content-Type = %q, want %q", resp.Headers[constants.HeaderContentType], constants.ContentTypeJSON)
-	}
+	assert.Equal(t, want, resp.Body, "want static fallback body")
+	assert.Equal(t, constants.ContentTypeJSON, resp.Headers[constants.HeaderContentType])
 }

@@ -14,6 +14,14 @@ const (
 	maxLocalLength = 64
 )
 
+// Repeated email validation messages, hoisted to a single source of truth.
+const (
+	msgEmailInvalid      = "is not a valid email address"
+	msgEmailTooLong      = "exceeds 254 characters"
+	msgEmailLocalTooLong = "local part exceeds 64 characters"
+	msgEmailBadDomain    = "has an invalid domain"
+)
+
 // NormalizedEmail is the result of NormalizeEmail. It carries both the
 // per-row canonical form (Address) used as the storage key and the
 // alias-collapsed Root used to group equivalent mailboxes (e.g. Gmail's
@@ -66,21 +74,21 @@ func NormalizeEmail(raw string) (NormalizedEmail, error) {
 func prepareEmailInput(raw string) (string, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		return "", NewValidationError("email", "is required")
+		return "", NewValidationError("email", msgRequired)
 	}
 	// A single trailing dot is the DNS root-label form ("example.com."); strip
 	// it so net/mail can parse, then carry on as if it had never been there.
 	trimmed = strings.TrimSuffix(trimmed, ".")
 	if trimmed == "" {
-		return "", NewValidationError("email", "is required")
+		return "", NewValidationError("email", msgRequired)
 	}
 
 	if len(trimmed) > maxEmailLength {
-		return "", NewValidationError("email", "exceeds 254 characters")
+		return "", NewValidationError("email", msgEmailTooLong)
 	}
 
 	if strings.ContainsAny(trimmed, "<>") {
-		return "", NewValidationError("email", "is not a valid email address")
+		return "", NewValidationError("email", msgEmailInvalid)
 	}
 
 	return trimmed, nil
@@ -91,7 +99,7 @@ func prepareEmailInput(raw string) (string, error) {
 func normalizeUnquoted(trimmed string) (NormalizedEmail, error) {
 	parsed, err := mail.ParseAddress(trimmed)
 	if err != nil || parsed.Name != "" {
-		return NormalizedEmail{}, NewValidationError("email", "is not a valid email address")
+		return NormalizedEmail{}, NewValidationError("email", msgEmailInvalid)
 	}
 
 	return buildUnquoted(parsed.Address)
@@ -105,12 +113,12 @@ func normalizeUnquoted(trimmed string) (NormalizedEmail, error) {
 func buildUnquoted(address string) (NormalizedEmail, error) {
 	local, domain, ok := splitLocalDomain(address)
 	if !ok {
-		return NormalizedEmail{}, NewValidationError("email", "is not a valid email address")
+		return NormalizedEmail{}, NewValidationError("email", msgEmailInvalid)
 	}
 
 	asciiDomain, err := canonicalDomain(domain)
 	if err != nil {
-		return NormalizedEmail{}, NewValidationError("email", "has an invalid domain")
+		return NormalizedEmail{}, NewValidationError("email", msgEmailBadDomain)
 	}
 
 	canonical, rule := LookupProviderRule(asciiDomain)
@@ -125,12 +133,12 @@ func buildUnquoted(address string) (NormalizedEmail, error) {
 	}
 
 	if len(foldedLocal) > maxLocalLength {
-		return NormalizedEmail{}, NewValidationError("email", "local part exceeds 64 characters")
+		return NormalizedEmail{}, NewValidationError("email", msgEmailLocalTooLong)
 	}
 
 	canonicalAddress := foldedLocal + "@" + canonical
 	if len(canonicalAddress) > maxEmailLength {
-		return NormalizedEmail{}, NewValidationError("email", "exceeds 254 characters")
+		return NormalizedEmail{}, NewValidationError("email", msgEmailTooLong)
 	}
 
 	return NormalizedEmail{
@@ -147,7 +155,7 @@ func buildUnquoted(address string) (NormalizedEmail, error) {
 // are skipped because quoted strings are opaque per RFC 5321 §4.1.2.
 func normalizeQuoted(trimmed string) (NormalizedEmail, error) {
 	if _, err := mail.ParseAddress(trimmed); err != nil {
-		return NormalizedEmail{}, NewValidationError("email", "is not a valid email address")
+		return NormalizedEmail{}, NewValidationError("email", msgEmailInvalid)
 	}
 
 	return buildQuoted(trimmed)
@@ -161,7 +169,7 @@ func normalizeQuoted(trimmed string) (NormalizedEmail, error) {
 func buildQuoted(trimmed string) (NormalizedEmail, error) {
 	closeIdx := closingQuoteIndex(trimmed)
 	if closeIdx < 0 || closeIdx+1 >= len(trimmed) || trimmed[closeIdx+1] != '@' {
-		return NormalizedEmail{}, NewValidationError("email", "is not a valid email address")
+		return NormalizedEmail{}, NewValidationError("email", msgEmailInvalid)
 	}
 
 	quotedLocal := trimmed[:closeIdx+1]
@@ -172,17 +180,17 @@ func buildQuoted(trimmed string) (NormalizedEmail, error) {
 	}
 
 	if len(quotedLocal) > maxLocalLength {
-		return NormalizedEmail{}, NewValidationError("email", "local part exceeds 64 characters")
+		return NormalizedEmail{}, NewValidationError("email", msgEmailLocalTooLong)
 	}
 
 	canonical, err := canonicalDomain(rawDomain)
 	if err != nil {
-		return NormalizedEmail{}, NewValidationError("email", "has an invalid domain")
+		return NormalizedEmail{}, NewValidationError("email", msgEmailBadDomain)
 	}
 
 	address := quotedLocal + "@" + canonical
 	if len(address) > maxEmailLength {
-		return NormalizedEmail{}, NewValidationError("email", "exceeds 254 characters")
+		return NormalizedEmail{}, NewValidationError("email", msgEmailTooLong)
 	}
 
 	return NormalizedEmail{

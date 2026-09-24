@@ -6,6 +6,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/mrz1836/go-foundation/constants"
 	"github.com/mrz1836/go-foundation/httputil"
 )
@@ -62,17 +65,9 @@ func TestWriteJSON(t *testing.T) {
 			w := httptest.NewRecorder()
 			httputil.WriteJSON(w, tt.status, tt.data)
 
-			if w.Code != tt.wantStatus {
-				t.Errorf("status = %d, want %d", w.Code, tt.wantStatus)
-			}
-
-			if ct := w.Header().Get("Content-Type"); ct != tt.wantCT {
-				t.Errorf("Content-Type = %q, want %q", ct, tt.wantCT)
-			}
-
-			if w.Body.String() != tt.wantBody {
-				t.Errorf("body = %q, want %q", w.Body.String(), tt.wantBody)
-			}
+			assert.Equal(t, tt.wantStatus, w.Code)
+			assert.Equal(t, tt.wantCT, w.Header().Get("Content-Type"))
+			assert.Equal(t, tt.wantBody, w.Body.String())
 		})
 	}
 }
@@ -83,26 +78,14 @@ func TestWriteError(t *testing.T) {
 	w := httptest.NewRecorder()
 	httputil.WriteError(w, http.StatusBadRequest, "MY_CODE", "something went wrong", "req-abc")
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", w.Code)
-	}
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 
 	var resp httputil.ErrorResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 
-	if resp.Error != "something went wrong" {
-		t.Errorf("error = %q, want 'something went wrong'", resp.Error)
-	}
-
-	if resp.Code != "MY_CODE" {
-		t.Errorf("code = %q, want 'MY_CODE'", resp.Code)
-	}
-
-	if resp.RequestID != "req-abc" {
-		t.Errorf("request_id = %q, want 'req-abc'", resp.RequestID)
-	}
+	assert.Equal(t, "something went wrong", resp.Error)
+	assert.Equal(t, "MY_CODE", resp.Code)
+	assert.Equal(t, "req-abc", resp.RequestID)
 }
 
 func TestWriteErrorOmitsEmptyRequestID(t *testing.T) {
@@ -112,48 +95,28 @@ func TestWriteErrorOmitsEmptyRequestID(t *testing.T) {
 	httputil.WriteError(w, http.StatusInternalServerError, constants.ErrorCodeInternalError, constants.ErrorMessageInternalError, "")
 
 	var resp httputil.ErrorResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 
-	if resp.RequestID != "" {
-		t.Errorf("request_id should be omitted when empty, got %q", resp.RequestID)
-	}
+	assert.Empty(t, resp.RequestID, "request_id should be omitted when empty")
 
 	// Confirm request_id key is absent from the raw JSON
 	var raw map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
-		t.Fatalf("unmarshal raw: %v", err)
-	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &raw))
 
-	if _, ok := raw["request_id"]; ok {
-		t.Error("request_id key should be omitted from JSON when empty")
-	}
+	assert.NotContains(t, raw, "request_id", "request_id key should be omitted from JSON when empty")
 }
 
 func assertErrorResponse(t *testing.T, w *httptest.ResponseRecorder, wantStatus int, wantCode, wantRequestID string) {
 	t.Helper()
 
-	if w.Code != wantStatus {
-		t.Errorf("status = %d, want %d", w.Code, wantStatus)
-	}
-
-	if ct := w.Header().Get("Content-Type"); ct != constants.ContentTypeJSON {
-		t.Errorf("Content-Type = %q, want %q", ct, constants.ContentTypeJSON)
-	}
+	assert.Equal(t, wantStatus, w.Code)
+	assert.Equal(t, constants.ContentTypeJSON, w.Header().Get("Content-Type"))
 
 	var resp httputil.ErrorResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 
-	if resp.Code != wantCode {
-		t.Errorf("code = %q, want %q", resp.Code, wantCode)
-	}
-
-	if resp.RequestID != wantRequestID {
-		t.Errorf("request_id = %q, want %q", resp.RequestID, wantRequestID)
-	}
+	assert.Equal(t, wantCode, resp.Code)
+	assert.Equal(t, wantRequestID, resp.RequestID)
 }
 
 func TestNamedHelpers(t *testing.T) {

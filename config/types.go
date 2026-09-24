@@ -134,45 +134,57 @@ func (d *WriteDatabaseConfig) ConnMaxLifetimeDuration() time.Duration {
 	return time.Duration(d.ConnMaxLifetime) * time.Minute
 }
 
+// ReadDatabaseConfig and WriteDatabaseConfig have an identical memory layout
+// (only their env-tag prefixes differ), so the read methods delegate to the write
+// implementations through a zero-cost conversion. This keeps a single source of
+// truth for the DSN and getter logic while preserving both concrete types and
+// their load-bearing struct tags.
+
 // ConnectionString builds a PostgreSQL connection string from ReadDatabaseConfig.
 // Returns a DSN suitable for use with pgx driver.
 func (d *ReadDatabaseConfig) ConnectionString() string {
-	return buildConnectionString(d.Host, d.Port, d.Database, d.Username, d.Password, d.SSLMode)
+	return (*WriteDatabaseConfig)(d).ConnectionString()
 }
 
 // GetHost returns the database host.
-func (d *ReadDatabaseConfig) GetHost() string { return d.Host }
+func (d *ReadDatabaseConfig) GetHost() string { return (*WriteDatabaseConfig)(d).GetHost() }
 
 // GetPort returns the database port.
-func (d *ReadDatabaseConfig) GetPort() int { return d.Port }
+func (d *ReadDatabaseConfig) GetPort() int { return (*WriteDatabaseConfig)(d).GetPort() }
 
 // GetDatabase returns the database name.
-func (d *ReadDatabaseConfig) GetDatabase() string { return d.Database }
+func (d *ReadDatabaseConfig) GetDatabase() string { return (*WriteDatabaseConfig)(d).GetDatabase() }
 
 // GetUsername returns the database username.
-func (d *ReadDatabaseConfig) GetUsername() string { return d.Username }
+func (d *ReadDatabaseConfig) GetUsername() string { return (*WriteDatabaseConfig)(d).GetUsername() }
 
 // GetPassword returns the database password.
-func (d *ReadDatabaseConfig) GetPassword() string { return d.Password }
+func (d *ReadDatabaseConfig) GetPassword() string { return (*WriteDatabaseConfig)(d).GetPassword() }
 
 // GetSSLMode returns the SSL mode.
-func (d *ReadDatabaseConfig) GetSSLMode() string { return d.SSLMode }
+func (d *ReadDatabaseConfig) GetSSLMode() string { return (*WriteDatabaseConfig)(d).GetSSLMode() }
 
 // GetMaxOpenConns returns the maximum number of open connections.
-func (d *ReadDatabaseConfig) GetMaxOpenConns() int { return d.MaxOpenConns }
+func (d *ReadDatabaseConfig) GetMaxOpenConns() int {
+	return (*WriteDatabaseConfig)(d).GetMaxOpenConns()
+}
 
 // GetMaxIdleConns returns the maximum number of idle connections.
-func (d *ReadDatabaseConfig) GetMaxIdleConns() int { return d.MaxIdleConns }
+func (d *ReadDatabaseConfig) GetMaxIdleConns() int {
+	return (*WriteDatabaseConfig)(d).GetMaxIdleConns()
+}
 
 // GetConnMaxLifetime returns the connection maximum lifetime in minutes.
-func (d *ReadDatabaseConfig) GetConnMaxLifetime() int { return d.ConnMaxLifetime }
+func (d *ReadDatabaseConfig) GetConnMaxLifetime() int {
+	return (*WriteDatabaseConfig)(d).GetConnMaxLifetime()
+}
 
 // GetDriver returns the database driver name.
-func (d *ReadDatabaseConfig) GetDriver() string { return d.Driver }
+func (d *ReadDatabaseConfig) GetDriver() string { return (*WriteDatabaseConfig)(d).GetDriver() }
 
 // ConnMaxLifetimeDuration returns the connection max lifetime as a time.Duration.
 func (d *ReadDatabaseConfig) ConnMaxLifetimeDuration() time.Duration {
-	return time.Duration(d.ConnMaxLifetime) * time.Minute
+	return (*WriteDatabaseConfig)(d).ConnMaxLifetimeDuration()
 }
 
 // buildConnectionString builds a PostgreSQL connection string from the given parameters.

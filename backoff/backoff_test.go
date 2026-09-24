@@ -1,6 +1,8 @@
 package backoff_test
 
 import (
+	"fmt"
+	"math"
 	"testing"
 	"time"
 
@@ -77,4 +79,39 @@ func TestExponentialFirstRungIsNeverClamped(t *testing.T) {
 
 	assert.Equal(t, base, backoff.Exponential(base, ceiling, 1), "the first rung is the unclamped base")
 	assert.Equal(t, ceiling, backoff.Exponential(base, ceiling, 2), "every rung after the first saturates at the sub-base cap")
+}
+
+// TestExponentialNoOverflow proves a large base against a near-max cap saturates
+// at maxDelay instead of overflowing the doubling to a negative duration.
+func TestExponentialNoOverflow(t *testing.T) {
+	t.Parallel()
+
+	const maxDelay = time.Duration(math.MaxInt64)
+	base := time.Duration(math.MaxInt64/2 + 1000) // doubling this overflows int64
+
+	for attempt := 2; attempt <= 10; attempt++ {
+		d := backoff.Exponential(base, maxDelay, attempt)
+		assert.Equalf(t, maxDelay, d, "attempt %d saturates at maxDelay", attempt)
+		assert.Positivef(t, d, "attempt %d never returns a negative delay", attempt)
+	}
+}
+
+// BenchmarkExponential sweeps the ladder at a first, middle, and saturated
+// attempt so a regression in the doubling loop or the cap short-circuit surfaces
+// at each rung.
+func BenchmarkExponential(b *testing.B) {
+	const (
+		base     = 100 * time.Millisecond
+		maxDelay = 30 * time.Second
+	)
+
+	for _, attempt := range []int{1, 5, 30} {
+		b.Run(fmt.Sprintf("attempt=%d", attempt), func(b *testing.B) {
+			b.ReportAllocs()
+
+			for range b.N {
+				_ = backoff.Exponential(base, maxDelay, attempt)
+			}
+		})
+	}
 }

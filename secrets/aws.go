@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -23,10 +24,13 @@ type AWSProvider struct {
 	client    *secretsmanager.Client
 	secretARN string
 
-	// Cached secrets (populated on first access)
-	cache     map[string]string
-	cacheOnce sync.Once
-	cacheErr  error
+	// Cached secrets (populated on first access). All four fields below are
+	// guarded by mu so that Refresh can safely reset the cache concurrently with
+	// in-flight GetAllSecrets/GetSecret calls in a long-running process.
+	mu       sync.Mutex
+	loaded   bool
+	cache    map[string]string
+	cacheErr error
 }
 
 // NewAWSProvider creates a new AWS Secrets Manager provider.
@@ -81,27 +85,37 @@ func (p *AWSProvider) GetSecret(ctx context.Context, key string) (string, error)
 // GetAllSecrets retrieves all secrets from AWS Secrets Manager.
 // Results are cached in memory after the first call.
 func (p *AWSProvider) GetAllSecrets(ctx context.Context) (map[string]string, error) {
-	p.cacheOnce.Do(func() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// Fetch once and cache; subsequent calls reuse the cached result until
+	// Refresh clears it. The fetch runs under the lock so a concurrent Refresh
+	// cannot tear the cache mid-load.
+	if !p.loaded {
 		p.cache, p.cacheErr = p.fetchSecrets(ctx)
-	})
+		p.loaded = true
+	}
 
 	if p.cacheErr != nil {
 		return nil, p.cacheErr
 	}
 
-	// Return a copy to prevent external modification of cache
-	result := make(map[string]string, len(p.cache))
-	for k, v := range p.cache {
-		result[k] = v
+	// Return a copy to prevent external modification of cache. A JSON "null"
+	// secret parses to a nil cache, so guard to keep returning a non-nil map.
+	if p.cache == nil {
+		return map[string]string{}, nil
 	}
 
-	return result, nil
+	return maps.Clone(p.cache), nil
 }
 
 // Refresh clears the cache and forces a refresh on the next GetSecret call.
 // This can be useful for long-running processes that need to pick up rotated secrets.
 func (p *AWSProvider) Refresh() {
-	p.cacheOnce = sync.Once{}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.loaded = false
 	p.cache = nil
 	p.cacheErr = nil
 }

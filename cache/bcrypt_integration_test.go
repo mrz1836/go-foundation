@@ -12,6 +12,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/mrz1836/go-foundation/cache"
+	"github.com/mrz1836/go-foundation/testutil"
 )
 
 // apiKey mirrors the credential record a real authorizer caches: an identifier,
@@ -61,16 +62,6 @@ func (l *bcryptLoader) getCallCount() int64 {
 	return atomic.LoadInt64(&l.callCount)
 }
 
-// integrationClock is a minimal fixed clock so the integration test drives the
-// public WithNowFunc seam without depending on wall-clock time.
-type integrationClock struct {
-	current time.Time
-}
-
-func (c *integrationClock) Now() time.Time {
-	return c.current
-}
-
 // TestBcryptMatcher_Integration proves the generic seam end-to-end with a real
 // bcrypt match function, mirroring the way an API-key authorizer uses the cache.
 // It drives only the exported cache API.
@@ -96,7 +87,7 @@ func TestBcryptMatcher_Integration(t *testing.T) {
 		return bcrypt.CompareHashAndPassword([]byte(k.KeyHash), []byte(raw)) == nil
 	}
 
-	clock := &integrationClock{current: time.Now()}
+	clock := testutil.NewFakeClock(time.Now())
 	c := cache.New(loader, match, cache.WithNowFunc(clock.Now))
 	ctx := context.Background()
 

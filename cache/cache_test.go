@@ -11,6 +11,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/mrz1836/go-foundation/testutil"
 )
 
 // ============================================================================
@@ -96,38 +98,6 @@ func (m *mockLoader) resetCallCount() {
 }
 
 // ============================================================================
-// Test Time Controller
-// ============================================================================
-
-// testClock provides a controllable clock for testing.
-type testClock struct {
-	mu      sync.RWMutex
-	current time.Time
-}
-
-func newTestClock(start time.Time) *testClock {
-	return &testClock{current: start}
-}
-
-func (c *testClock) Now() time.Time {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.current
-}
-
-func (c *testClock) Advance(d time.Duration) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.current = c.current.Add(d)
-}
-
-func (c *testClock) Set(t time.Time) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.current = t
-}
-
-// ============================================================================
 // Constructor / option Tests
 // ============================================================================
 
@@ -177,7 +147,7 @@ func TestNew_WithNowFunc(t *testing.T) {
 	t.Parallel()
 
 	loader := newMockLoader()
-	clock := newTestClock(time.Now())
+	clock := testutil.NewFakeClock(time.Now())
 	c := New(loader, matchEqual, WithNowFunc(clock.Now))
 
 	// Verify the custom now function is used.
@@ -262,7 +232,7 @@ func TestCache_TTLExpiration_ValidKey(t *testing.T) {
 	secret := "test_ttlexpire12345678901234" //nolint:gosec // G101: test fixture, not a real credential
 	loader.addKey(secret, true)
 
-	clock := newTestClock(time.Now())
+	clock := testutil.NewFakeClock(time.Now())
 	c := New(
 		loader,
 		matchEqual,
@@ -296,7 +266,7 @@ func TestCache_TTLExpiration_InvalidKey(t *testing.T) {
 	loader := newMockLoader()
 	loader.addKey("test_realkey999999999999999", true)
 
-	clock := newTestClock(time.Now())
+	clock := testutil.NewFakeClock(time.Now())
 	c := New(
 		loader,
 		matchEqual,
@@ -388,7 +358,7 @@ func TestCache_Stats(t *testing.T) {
 	loader := newMockLoader()
 	loader.addKey("test_statskey1234567890123", true)
 
-	clock := newTestClock(time.Now())
+	clock := testutil.NewFakeClock(time.Now())
 	c := New(loader, matchEqual, WithNowFunc(clock.Now))
 	ctx := context.Background()
 
@@ -628,7 +598,7 @@ func TestCache_MaxEntriesEviction(t *testing.T) {
 	// Add a valid key for the cache to load.
 	loader.addKey("test_evicttest123456789012", true)
 
-	clock := newTestClock(time.Now())
+	clock := testutil.NewFakeClock(time.Now())
 	maxEntries := 100
 	c := New(loader, matchEqual, WithNowFunc(clock.Now), WithMaxEntries(maxEntries))
 	ctx := context.Background()
@@ -663,7 +633,7 @@ func TestCache_MaxEntriesEviction_RemovesOldestWhenNoneExpired(t *testing.T) {
 	// Add a valid key for the cache to load.
 	loader.addKey("test_evictoldest123456789012", true)
 
-	clock := newTestClock(time.Now())
+	clock := testutil.NewFakeClock(time.Now())
 	maxEntries := 100
 	c := New(loader, matchEqual, WithNowFunc(clock.Now), WithMaxEntries(maxEntries))
 	ctx := context.Background()
@@ -726,7 +696,7 @@ func TestCache_RemoveOldestEntries_DynamicPercentage(t *testing.T) {
 			t.Parallel()
 
 			loader := newMockLoader()
-			clock := newTestClock(time.Now())
+			clock := testutil.NewFakeClock(time.Now())
 			c := New(loader, matchEqual, WithNowFunc(clock.Now))
 
 			// Fill cache with entries of varying ages.
@@ -822,6 +792,72 @@ func TestCache_ValidateAndCache_DoubleCheckAfterLock(t *testing.T) {
 	}
 }
 
+// TestCache_ConcurrentValidateAndRefresh stresses the lock-free match scan and
+// the single-flight refresh: many goroutines validate valid/invalid/unique keys
+// while Invalidate repeatedly forces reloads. Run under -race, it guards the
+// snapshot-and-scan-without-the-write-lock design against data races, and asserts
+// a known key still validates correctly after the churn.
+func TestCache_ConcurrentValidateAndRefresh(t *testing.T) {
+	t.Parallel()
+
+	loader := newMockLoader()
+
+	const knownKeys = 20
+	for i := range knownKeys {
+		loader.addKey(fmt.Sprintf("valid-secret-%02d-abcdefghij", i), true)
+	}
+
+	clock := testutil.NewFakeClock(time.Now())
+	c := New(loader, matchEqual, WithNowFunc(clock.Now), WithMaxEntries(200))
+	ctx := context.Background()
+
+	const goroutines = 50
+
+	const opsPerGoroutine = 100
+
+	var wg sync.WaitGroup
+
+	wg.Add(goroutines)
+
+	for g := range goroutines {
+		go func(g int) {
+			defer wg.Done()
+			cacheChurnWorker(ctx, c, g, knownKeys, opsPerGoroutine)
+		}(g)
+	}
+
+	wg.Wait()
+
+	// A known key still validates correctly, and the returned item is a fresh copy
+	// unaffected by the concurrent tampering above.
+	item, err := c.Validate(ctx, "valid-secret-00-abcdefghij")
+	require.NoError(t, err)
+	require.NotNil(t, item)
+	assert.Equal(t, "valid-secret-00-abcdefghij", item.secret)
+}
+
+// cacheChurnWorker drives a mix of valid/invalid validations and periodic
+// invalidations against c, used by the concurrency stress test.
+func cacheChurnWorker(ctx context.Context, c *Cache[testItem], g, knownKeys, ops int) {
+	for i := range ops {
+		validateAndTamper(ctx, c, fmt.Sprintf("valid-secret-%02d-abcdefghij", i%knownKeys))
+		_, _ = c.Validate(ctx, fmt.Sprintf("unknown-%d-%d", g, i))
+
+		if i%25 == 0 {
+			c.Invalidate()
+		}
+	}
+}
+
+// validateAndTamper validates key and, on a hit, mutates the returned item to
+// prove copyItem hands back a copy rather than the shared cached pointer.
+func validateAndTamper(ctx context.Context, c *Cache[testItem], key string) {
+	item, err := c.Validate(ctx, key)
+	if err == nil && item != nil {
+		item.secret = "tampered"
+	}
+}
+
 // ============================================================================
 // Benchmark Tests
 // ============================================================================
@@ -875,4 +911,91 @@ func BenchmarkCache_ParallelReads(b *testing.B) {
 			_, _ = c.Validate(ctx, secret)
 		}
 	})
+}
+
+// costlyMatch simulates a non-trivial comparison (e.g. a password-hash compare)
+// so the match scan on a miss has real cost, exposing whether that scan blocks
+// concurrent cache hits.
+func costlyMatch(raw string, it testItem) bool {
+	var acc uint64 = 1469598103934665603
+	for j := 0; j < 4096; j++ {
+		acc = (acc ^ uint64(raw[j%len(raw)])) * 1099511628211
+	}
+
+	sink.Store(acc)
+
+	return raw == it.secret
+}
+
+// sink defeats dead-code elimination of costlyMatch's work.
+var sink atomic.Uint64 //nolint:gochecknoglobals // benchmark sink to prevent DCE of the simulated match cost
+
+// BenchmarkCache_ParallelMixed measures parallel validation that is mostly cache
+// hits with an occasional miss forcing a costly match scan. It exercises whether
+// a miss's scan serializes concurrent hits (it must not, since the scan runs
+// lock-free over an immutable snapshot).
+func BenchmarkCache_ParallelMixed(b *testing.B) {
+	loader := newMockLoader()
+
+	const items = 64
+	for i := range items {
+		loader.addKey(fmt.Sprintf("valid-secret-%03d-abcdefghij", i), true)
+	}
+
+	c := New(loader, costlyMatch, WithMaxEntries(100000))
+	ctx := context.Background()
+
+	// Warm the loaded set and a hot hit.
+	_, _ = c.Validate(ctx, "valid-secret-000-abcdefghij")
+
+	var ctr atomic.Int64
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			n := ctr.Add(1)
+			if n%16 == 0 {
+				// Miss (globally unique key): forces a costly match scan over all
+				// loaded items.
+				_, _ = c.Validate(ctx, fmt.Sprintf("miss-%d", n))
+			} else {
+				// Hit: must not be blocked by another goroutine's scan.
+				_, _ = c.Validate(ctx, "valid-secret-000-abcdefghij")
+			}
+		}
+	})
+}
+
+// BenchmarkCache_Eviction measures removeOldestEntries on a full cache. The map
+// is refilled with staggered-age entries outside the timer, so the reported cost
+// is purely the age computation, sort, and eviction of the oldest ~10%.
+func BenchmarkCache_Eviction(b *testing.B) {
+	const size = 5000
+
+	clock := testutil.NewFakeClock(time.Unix(0, 0).UTC())
+	loader := newMockLoader()
+	c := New(loader, matchEqual, WithMaxEntries(size), WithNowFunc(clock.Now))
+
+	base := clock.Now()
+	build := func() {
+		c.entries = make(map[string]*entry[testItem], size)
+		for i := 0; i < size; i++ {
+			key := hashKey(fmt.Sprintf("bench-evict-%d", i))
+			c.entries[key] = &entry[testItem]{
+				checkedAt: base.Add(-time.Duration(i) * time.Millisecond),
+				ttl:       time.Hour,
+			}
+		}
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		build()
+		b.StartTimer()
+
+		c.removeOldestEntries(base)
+	}
 }

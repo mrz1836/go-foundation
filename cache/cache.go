@@ -218,8 +218,13 @@ func WithNowFunc(fn func() time.Time) Option {
 type Cache[T any] struct {
 	mu       sync.RWMutex
 	entries  map[string]*entry[T] // key: SHA-256 of raw secret, value: validation result
-	loaded   []T                  // full loaded set
+	loaded   []T                  // full loaded set (only ever replaced wholesale, never mutated in place)
 	loadedAt time.Time            // when the loaded set was last refreshed
+
+	// refreshMu single-flights loader refreshes so a stale set triggers at most
+	// one concurrent LoadAll, and so the loader I/O runs without holding mu (which
+	// would block cache hits on the read lock).
+	refreshMu sync.Mutex
 
 	ttl        time.Duration // default TTL for valid entries
 	invalidTTL time.Duration // TTL for invalid entries
@@ -308,7 +313,7 @@ func (c *Cache[T]) Validate(ctx context.Context, rawKey string) (*T, error) {
 	// Cache hit with fresh entry
 	if exists && !e.isExpired(now) {
 		if e.valid {
-			return e.item, nil
+			return copyItem(e.item), nil
 		}
 		return nil, nil
 	}
@@ -415,97 +420,130 @@ func (c *Cache[T]) Stats() Stats {
 //
 //nolint:nilnil // Returning (nil, nil) is intentional - a nil item with a nil error signals "not found" without an error
 func (c *Cache[T]) validateAndCache(ctx context.Context, rawKey, cacheKey string, loadedValid bool, now time.Time) (*T, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// Double-check after acquiring write lock (another goroutine may have updated)
+	// Double-check the entries cache first: if another goroutine already cached a
+	// fresh result for this key between the fast-path RUnlock and here, return it
+	// directly without touching the loader.
+	c.mu.RLock()
 	if e, exists := c.entries[cacheKey]; exists && !e.isExpired(now) {
-		if e.valid {
-			return e.item, nil
+		valid, item := e.valid, e.item
+		c.mu.RUnlock()
+
+		if valid {
+			return copyItem(item), nil
 		}
 		return nil, nil
 	}
+	c.mu.RUnlock()
 
-	// Refresh the loaded set if stale or never loaded
-	if !loadedValid || c.loadedAt.IsZero() || now.Sub(c.loadedAt) >= c.ttl {
-		if err := c.refreshLocked(ctx, now); err != nil {
-			return nil, err
+	// Miss: ensure a fresh loaded set and take an immutable snapshot of it. The
+	// refresh is single-flighted and runs without holding mu, so it never blocks
+	// concurrent cache hits.
+	loaded, err := c.loadedSnapshot(ctx, loadedValid, now)
+	if err != nil {
+		return nil, err
+	}
+
+	// Run the match scan lock-free over the immutable snapshot. All comparison
+	// cost (for example a bcrypt compare) lives in match, so holding no lock here
+	// keeps cache hits and other misses from serializing behind it.
+	result := scanLoaded(loaded, c.match, rawKey, now, c.ttl, c.invalidTTL)
+
+	// Store the result under the write lock, enforcing the size bound. A final
+	// double-check prefers an entry another goroutine may have stored meanwhile.
+	c.mu.Lock()
+	if e, exists := c.entries[cacheKey]; exists && !e.isExpired(now) {
+		result = e
+	} else {
+		if len(c.entries) >= c.maxEntries {
+			c.evictOldestLocked(now)
 		}
+		c.entries[cacheKey] = result
 	}
+	valid, item := result.valid, result.item
+	c.mu.Unlock()
 
-	// Enforce max cache size before adding new entry
-	if len(c.entries) >= c.maxEntries {
-		c.evictOldestLocked(now)
-	}
-
-	// Validate against the loaded set (via the match function)
-	result := c.validateAgainstLoadedLocked(rawKey, now)
-
-	// Cache the result
-	c.entries[cacheKey] = result
-
-	if result.valid {
-		return result.item, nil
+	if valid {
+		return copyItem(item), nil
 	}
 	return nil, nil
 }
 
-// refreshLocked reloads the full set of items from the loader and updates the
-// in-memory loaded slice.
-//
-// Inputs:
-//   - ctx: context used for the loader call; cancellation or timeout propagate
-//     to the underlying LoadAll operation.
-//   - now: timestamp recorded as the loaded time to indicate when the refresh
-//     occurred.
-//
-// Outputs:
-//   - error: non-nil if the loader call fails; in that case the cache keeps its
-//     previous loaded set and the caller will see the error.
+// loadedSnapshot returns an immutable snapshot of the loaded set, refreshing it
+// first if it is stale or missing.
 //
 // Concurrency:
-//   - Must be called with the cache's write lock held; it mutates loaded and
-//     the loaded timestamp directly.
-func (c *Cache[T]) refreshLocked(ctx context.Context, now time.Time) error {
-	items, err := c.loader.LoadAll(ctx)
-	if err != nil {
-		return err
+//   - The refresh is single-flighted via refreshMu, so a stale set triggers at
+//     most one concurrent LoadAll; the loader I/O runs without holding mu, so
+//     cache hits (which take the read lock) are not blocked during a reload.
+//   - The returned slice is a snapshot of c.loaded, which is only ever replaced
+//     wholesale (never mutated in place), so the caller may scan it without a
+//     lock.
+func (c *Cache[T]) loadedSnapshot(ctx context.Context, loadedValid bool, now time.Time) ([]T, error) {
+	c.mu.RLock()
+	fresh := loadedValid && !c.loadedAt.IsZero() && now.Sub(c.loadedAt) < c.ttl
+	snapshot := c.loaded
+	c.mu.RUnlock()
+
+	if fresh {
+		return snapshot, nil
 	}
 
-	// Copy into a fresh slice to avoid retaining the loader's backing array
-	c.loaded = make([]T, len(items))
-	copy(c.loaded, items)
-	c.loadedAt = now
+	// Single-flight the refresh: only one goroutine loads while the rest wait and
+	// then observe the fresh set.
+	c.refreshMu.Lock()
+	defer c.refreshMu.Unlock()
 
-	return nil
+	// Re-check under the read lock — another goroutine may have refreshed while we
+	// waited for refreshMu — so we neither reload redundantly nor block hits.
+	c.mu.RLock()
+	stale := c.loadedAt.IsZero() || now.Sub(c.loadedAt) >= c.ttl
+	snapshot = c.loaded
+	c.mu.RUnlock()
+
+	if !stale {
+		return snapshot, nil
+	}
+
+	items, err := c.loader.LoadAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Copy into a fresh slice so the published set does not retain the loader's
+	// backing array; publishing by replacement (never in-place mutation) is what
+	// makes the returned snapshot safe to scan lock-free.
+	loaded := make([]T, len(items))
+	copy(loaded, items)
+
+	c.mu.Lock()
+	c.loaded = loaded
+	c.loadedAt = now
+	c.mu.Unlock()
+
+	return loaded, nil
 }
 
-// validateAgainstLoadedLocked attempts to match the provided raw secret against
-// every item in the loaded set.
-//
-// Input:
-//   - rawKey: the plain-text secret to compare against loaded items.
-//   - now: timestamp used when constructing the resulting entry.
+// scanLoaded matches rawKey against every item in loaded (an immutable snapshot)
+// and returns the resulting cache entry.
 //
 // Output:
-//   - *entry[T]: a new entry describing whether the secret was valid. If a match
-//     is found, the entry is marked valid, contains a copy of the matching item,
-//     and uses the cache's valid TTL. If no match is found, the entry is marked
-//     invalid, has a nil item, and uses the cache's invalid TTL.
+//   - *entry[T]: a new entry describing whether the secret was valid. On a match
+//     it is marked valid, holds a copy of the matching item, and uses validTTL;
+//     otherwise it is invalid, holds a nil item, and uses invalidTTL.
 //
 // Concurrency:
-//   - Must be called with the cache's write lock held since it reads from
-//     loaded, which may be mutated elsewhere under the same lock.
-func (c *Cache[T]) validateAgainstLoadedLocked(rawKey string, now time.Time) *entry[T] {
-	for i := range c.loaded {
-		if c.match(rawKey, c.loaded[i]) {
+//   - Holds no lock. loaded is an immutable snapshot, so the potentially
+//     expensive match calls do not serialize other cache operations.
+func scanLoaded[T any](loaded []T, match func(string, T) bool, rawKey string, now time.Time, validTTL, invalidTTL time.Duration) *entry[T] {
+	for i := range loaded {
+		if match(rawKey, loaded[i]) {
 			// Copy the element to avoid slice-element reference issues
-			it := c.loaded[i]
+			it := loaded[i]
 			return &entry[T]{
 				valid:     true,
 				item:      &it,
 				checkedAt: now,
-				ttl:       c.ttl,
+				ttl:       validTTL,
 			}
 		}
 	}
@@ -515,7 +553,7 @@ func (c *Cache[T]) validateAgainstLoadedLocked(rawKey string, now time.Time) *en
 		valid:     false,
 		item:      nil,
 		checkedAt: now,
-		ttl:       c.invalidTTL,
+		ttl:       invalidTTL,
 	}
 }
 
@@ -598,6 +636,21 @@ func (c *Cache[T]) removeOldestEntries(now time.Time) {
 	for i := 0; i < toRemove && i < len(oldest); i++ {
 		delete(c.entries, oldest[i].key)
 	}
+}
+
+// copyItem returns a shallow copy of the pointed-to value so a caller cannot
+// mutate the item retained in the cache — the cached entry's *T is shared across
+// every validation of the same secret, so returning it directly would let one
+// caller poison the result for all others. Nested reference types (maps, slices,
+// pointers) remain shared; callers must treat those as read-only.
+func copyItem[T any](p *T) *T {
+	if p == nil {
+		return nil
+	}
+
+	v := *p
+
+	return &v
 }
 
 // hashKey returns a SHA-256 hex digest of the raw secret for use as an entries

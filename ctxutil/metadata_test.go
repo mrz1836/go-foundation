@@ -130,3 +130,27 @@ func TestRequestIDFromMetadata(t *testing.T) {
 		})
 	}
 }
+
+// BenchmarkRequestIDToMetadata measures the JSON merge-and-marshal on the
+// request-id stamping (write) path.
+func BenchmarkRequestIDToMetadata(b *testing.B) {
+	base := []byte(`{"tenant":"acme"}`)
+
+	b.ReportAllocs()
+
+	for range b.N {
+		_ = ctxutil.RequestIDToMetadata(base, "req-benchmark-0123456789")
+	}
+}
+
+// BenchmarkRequestIDFromMetadata measures the JSON unmarshal on the request-id
+// extraction (read) path.
+func BenchmarkRequestIDFromMetadata(b *testing.B) {
+	raw := []byte(`{"tenant":"acme","request_id":"req-benchmark-0123456789"}`)
+
+	b.ReportAllocs()
+
+	for range b.N {
+		_ = ctxutil.RequestIDFromMetadata(raw)
+	}
+}

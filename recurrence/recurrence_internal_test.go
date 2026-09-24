@@ -1,8 +1,10 @@
 package recurrence
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 )
 
 // sscanfParseTimeHHMM is the previous fmt.Sscanf-based implementation, kept as a
@@ -47,9 +49,33 @@ func FuzzParseTimeHHMM(f *testing.F) {
 // BenchmarkParseTimeHHMM measures the hot-path time parse used by
 // NextOccurrence.
 func BenchmarkParseTimeHHMM(b *testing.B) {
-	var h, m int
-	for i := 0; i < b.N; i++ {
-		h, m, _ = parseTimeHHMM("17:30")
+	b.ReportAllocs()
+
+	for range b.N {
+		_, _, _ = parseTimeHHMM("17:30")
 	}
-	_, _ = h, m
+}
+
+// BenchmarkParsePattern measures JSON decoding of a well-formed pattern.
+func BenchmarkParsePattern(b *testing.B) {
+	raw := json.RawMessage(`{"day_of_week":"friday","start_time":"17:00","end_time":"22:00"}`)
+
+	b.ReportAllocs()
+
+	for range b.N {
+		_, _ = ParsePattern(raw)
+	}
+}
+
+// BenchmarkNextOccurrence measures the full parse-and-compute path callers hit
+// when scheduling the next instance of a recurring event.
+func BenchmarkNextOccurrence(b *testing.B) {
+	raw := json.RawMessage(`{"day_of_week":"friday","start_time":"17:00","end_time":"22:00"}`)
+	after := time.Date(2025, 3, 10, 9, 0, 0, 0, time.UTC)
+
+	b.ReportAllocs()
+
+	for range b.N {
+		_, _ = NextOccurrence(raw, after, time.UTC)
+	}
 }

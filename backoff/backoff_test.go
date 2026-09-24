@@ -1,6 +1,7 @@
 package backoff_test
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -77,4 +78,24 @@ func TestExponentialFirstRungIsNeverClamped(t *testing.T) {
 
 	assert.Equal(t, base, backoff.Exponential(base, ceiling, 1), "the first rung is the unclamped base")
 	assert.Equal(t, ceiling, backoff.Exponential(base, ceiling, 2), "every rung after the first saturates at the sub-base cap")
+}
+
+// BenchmarkExponential sweeps the ladder at a first, middle, and saturated
+// attempt so a regression in the doubling loop or the cap short-circuit surfaces
+// at each rung.
+func BenchmarkExponential(b *testing.B) {
+	const (
+		base     = 100 * time.Millisecond
+		maxDelay = 30 * time.Second
+	)
+
+	for _, attempt := range []int{1, 5, 30} {
+		b.Run(fmt.Sprintf("attempt=%d", attempt), func(b *testing.B) {
+			b.ReportAllocs()
+
+			for range b.N {
+				_ = backoff.Exponential(base, maxDelay, attempt)
+			}
+		})
+	}
 }

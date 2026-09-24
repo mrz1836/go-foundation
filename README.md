@@ -105,25 +105,26 @@ and is consumed everywhere.
 The module carries only generic building blocks — no business domain, no project-specific
 naming. As the kit is assembled it exposes focused sub-packages:
 
-- **`config`** — application, database, logging, and AWS configuration types
-- **`lambda`** — AWS Lambda (API Gateway v2) ⇄ `net/http` adapter
-- **`middleware`** — logging, recovery, and request-ID HTTP middleware
-- **`ctxutil`** — request-ID context propagation helpers
-- **`httputil`** — JSON response and error helpers
-- **`pagination`** — cursor-based list pagination
-- **`cache`** — generic two-tier TTL cache for validating opaque secrets (bounded, DoS-guarded, injectable clock)
-- **`recurrence`** — DST-correct next-occurrence calculator for weekly recurring event patterns
 - **`backoff`** — exponential retry-delay ladder (base, doubling, capped)
+- **`cache`** — generic two-tier TTL cache for validating opaque secrets (bounded, DoS-guarded, injectable clock)
+- **`config`** — application, database, logging, and AWS configuration types
+- **`constants`** — shared HTTP constants: header names, content types, CORS values, and standardized error codes and messages
 - **`crypto`** — auth primitives: HMAC/SHA-256 hashing, argon2id passwords, CSPRNG tokens (constant-time compares)
-- **`sliceutil`** — generic slice helpers (order-preserving dedupe, set intersection)
-- **`ptr`** — generic pointer helpers (`To`, `Deref`, `DerefOr`)
-- **`jsonpath`** — address values in a decoded-JSON tree via a small JSONPath subset
-- **`strtmpl`** — safe `{{name}}` placeholder substitution from layered value maps
-- **`models`** — generic `BaseModel`, `Repository`, `Clock`, and transaction helpers
-- **`secrets`** — pluggable secret providers (env, AWS, mock)
+- **`ctxutil`** — request-ID context propagation helpers
 - **`db`** — database connection helpers
 - **`health`** — health-check helpers
+- **`httputil`** — JSON response and error helpers
+- **`jsonpath`** — address values in a decoded-JSON tree via a small JSONPath subset
+- **`lambda`** — AWS Lambda (API Gateway v2) ⇄ `net/http` adapter
+- **`middleware`** — logging, recovery, and request-ID HTTP middleware
+- **`models`** — generic `BaseModel`, `Repository`, `Clock`, and transaction helpers
 - **`observability`** — structured logging initialization
+- **`pagination`** — cursor-based list pagination
+- **`ptr`** — generic pointer helpers (`To`, `Deref`, `DerefOr`)
+- **`recurrence`** — DST-correct next-occurrence calculator for weekly recurring event patterns
+- **`secrets`** — pluggable secret providers (env, AWS, mock)
+- **`sliceutil`** — generic slice helpers (order-preserving dedupe, set intersection)
+- **`strtmpl`** — safe `{{name}}` placeholder substitution from layered value maps
 - **`testutil`** — dependency-light generic test helpers (in-memory test database, test config, HTTP doer double, log recorder, free port); the testcontainers-backed PostgreSQL harness lives in the `testutil/pgtest` subpackage
 
 > Project-specific naming — environment prefixes, database names, health messages, and infrastructure constants — intentionally stays in the consuming services, never in this module.

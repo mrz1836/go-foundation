@@ -142,7 +142,7 @@ go install github.com/mrz1836/mage-x/cmd/magex@latest
 ## 📚 Documentation
 
 - **API Reference** – Dive into the godocs at [pkg.go.dev/github.com/mrz1836/go-foundation](https://pkg.go.dev/github.com/mrz1836/go-foundation)
-- **Benchmarks** – Check the latest numbers in the [benchmark results](#benchmark-results)
+- **Benchmarks** – Browse the [benchmark catalog](#benchmark-catalog) and compare runs with the [benchmark results](#benchmark-results) workflow
 - **Test Suite** – Review both the [unit tests](foundation_test.go) (powered by [`testify`](https://github.com/stretchr/testify))
 
 <br/>
@@ -252,13 +252,96 @@ magex test:race
 
 ## ⚡ Benchmarks
 
-Run the Go benchmarks:
+Every performance-sensitive path ships with a Go benchmark so changes can be **measured, not guessed**. Run them all:
 
 ```bash script
 magex bench
 ```
 
-> Benchmarks for the foundation sub-packages are added as those packages are extracted.
+…or with the standard toolchain (all packages, or a single one):
+
+```bash
+go test -bench=. -benchmem ./...
+go test -bench=. -benchmem ./cache/...
+go test -bench=BenchmarkCache_Eviction -benchmem ./cache/...
+```
+
+### Benchmark catalog
+
+Every benchmark in the module, linked to its source. The name links jump straight to the function so you can see exactly what is measured.
+
+| Package | Benchmark | Measures |
+|---------|-----------|----------|
+| `backoff` | [Exponential ladder](backoff/backoff_test.go#L86) | Retry delay at attempts 1 / 5 / 30 |
+| `cache` | [Cache hit](cache/cache_test.go#L799) | Revalidating an already-cached secret (fast path) |
+| `cache` | [Cache miss](cache/cache_test.go#L816) | Validating an unknown secret (loader + match scan) |
+| `cache` | [Parallel reads](cache/cache_test.go#L831) | Concurrent cache hits under the read lock |
+| `cache` | [Eviction](cache/cache_test.go#L853) | Evicting the oldest ~10% of a full cache |
+| `config` | [Load from env](config/load_test.go#L298) | Reflection-based env binding into a config struct |
+| `ctxutil` | [Request ID → metadata](ctxutil/metadata_test.go#L127) | JSON merge + marshal on the request-id stamping path |
+| `ctxutil` | [Request ID ← metadata](ctxutil/metadata_test.go#L139) | JSON unmarshal on the request-id extraction path |
+| `httputil` | [Write JSON](httputil/httputil_test.go#L196) | Marshal + write of a JSON response body |
+| `lambda` | [API Gateway → net/http](lambda/adapter_test.go#L282) | Full request/response adapter round-trip |
+| `middleware` | [Logging · large 200](middleware/logging_test.go#L481) | Logging a large successful response body |
+| `middleware` | [Logging · request path](middleware/logging_test.go#L512) | Request/response log pair on the happy path |
+| `middleware` | [Logging · error response](middleware/logging_test.go#L543) | Capturing + logging a 4xx/5xx body |
+| `models` | [Normalize email](models/email_test.go#L198) | Email parse + normalization |
+| `models` | [Normalize phone](models/phone_test.go#L78) | Phone parse + normalization |
+| `pagination` | [Encode cursor](pagination/pagination_test.go#L102) | Encoding a timestamp cursor |
+| `pagination` | [Decode cursor](pagination/pagination_test.go#L112) | Decoding a cursor string |
+| `recurrence` | [Parse HH:MM](recurrence/recurrence_internal_test.go#L51) | Hand-rolled start-time parse (hot path) |
+| `recurrence` | [Parse pattern](recurrence/recurrence_internal_test.go#L60) | JSON decode of a recurrence pattern |
+| `recurrence` | [Next occurrence](recurrence/recurrence_internal_test.go#L72) | Full parse + next-occurrence computation |
+
+### Benchmark results
+
+To measure the impact of a change, capture a baseline before and after and compare with [`benchstat`](https://pkg.go.dev/golang.org/x/perf/cmd/benchstat) — it reports the delta and whether it is statistically significant, so you are not chasing noise:
+
+```bash
+go install golang.org/x/perf/cmd/benchstat@latest
+
+# 1) baseline (e.g. on master), several runs for a stable distribution
+go test -bench=. -benchmem -count=6 ./... > old.txt
+
+# 2) after your change, from the same machine
+go test -bench=. -benchmem -count=6 ./... > new.txt
+
+# 3) compare
+benchstat old.txt new.txt
+```
+
+Absolute `ns/op` depends on the host, so treat the numbers below as a **point-in-time reference**, not a contract — the durable signal is the `benchstat` delta between two runs on the same machine.
+
+<details>
+<summary><strong>Reference snapshot</strong> — Go 1.27.1 · Apple M1 Max · 2026-09-24</summary>
+<br/>
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|------:|-----:|----------:|
+| Exponential ladder (attempt=1) | 0.63 | 0 | 0 |
+| Exponential ladder (attempt=5) | 2.55 | 0 | 0 |
+| Exponential ladder (attempt=30) | 3.83 | 0 | 0 |
+| Cache hit | 156 | 128 | 2 |
+| Cache miss | 190 | 152 | 3 |
+| Parallel reads | 153 | 128 | 2 |
+| Eviction | 507,752 | 122,880 | 1 |
+| Load from env | 3,836 | 1,440 | 37 |
+| Request ID → metadata | 909 | 593 | 16 |
+| Request ID ← metadata | 279 | 16 | 1 |
+| Write JSON | 716 | 1,129 | 15 |
+| API Gateway → net/http | 818 | 1,640 | 17 |
+| Logging · large 200 | 491,184 | 10,493,671 | 34 |
+| Logging · request path | 3,418 | 6,872 | 36 |
+| Logging · error response | 3,958 | 7,222 | 43 |
+| Normalize email | 641 | 208 | 9 |
+| Normalize phone | 577 | 73 | 5 |
+| Encode cursor | 17.9 | 16 | 1 |
+| Decode cursor | 23.2 | 16 | 1 |
+| Parse HH:MM | 24.5 | 0 | 0 |
+| Parse pattern | 334 | 48 | 1 |
+| Next occurrence | 408 | 48 | 1 |
+
+</details>
 
 <br/>
 

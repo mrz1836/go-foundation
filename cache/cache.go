@@ -18,9 +18,11 @@
 package cache
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"slices"
 	"sync"
 	"time"
 )
@@ -566,8 +568,8 @@ func (c *Cache[T]) removeExpiredEntries(now time.Time) {
 //
 // Behavior:
 //   - Computes the age of each remaining entry and then removes the oldest ~10%
-//     (rounded up to at least one entry). A simple selection algorithm is used
-//     here since the cache size is bounded.
+//     (rounded up to at least one entry). Entries are sorted by descending age
+//     and the leading toRemove keys are evicted.
 //
 // Concurrency:
 //   - Must be called with the cache's write lock held because it iterates over
@@ -588,15 +590,12 @@ func (c *Cache[T]) removeOldestEntries(now time.Time) {
 		oldest = append(oldest, keyAge{key: key, age: now.Sub(e.checkedAt)})
 	}
 
-	// Selection sort to find the oldest entries
+	// Sort by descending age so the oldest entries lead the slice, then evict the
+	// first toRemove keys. This O(n log n) sort replaces the previous partial
+	// selection sort, whose O(n*toRemove) cost was quadratic because toRemove
+	// scales with n (~10% of the cache).
+	slices.SortFunc(oldest, func(a, b keyAge) int { return cmp.Compare(b.age, a.age) })
 	for i := 0; i < toRemove && i < len(oldest); i++ {
-		maxIdx := i
-		for j := i + 1; j < len(oldest); j++ {
-			if oldest[j].age > oldest[maxIdx].age {
-				maxIdx = j
-			}
-		}
-		oldest[i], oldest[maxIdx] = oldest[maxIdx], oldest[i]
 		delete(c.entries, oldest[i].key)
 	}
 }

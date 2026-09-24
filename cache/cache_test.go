@@ -876,3 +876,35 @@ func BenchmarkCache_ParallelReads(b *testing.B) {
 		}
 	})
 }
+
+// BenchmarkCache_Eviction measures removeOldestEntries on a full cache. The map
+// is refilled with staggered-age entries outside the timer, so the reported cost
+// is purely the age computation, sort, and eviction of the oldest ~10%.
+func BenchmarkCache_Eviction(b *testing.B) {
+	const size = 5000
+
+	clock := newTestClock(time.Unix(0, 0).UTC())
+	loader := newMockLoader()
+	c := New(loader, matchEqual, WithMaxEntries(size), WithNowFunc(clock.Now))
+
+	base := clock.Now()
+	build := func() {
+		c.entries = make(map[string]*entry[testItem], size)
+		for i := 0; i < size; i++ {
+			key := hashKey(fmt.Sprintf("bench-evict-%d", i))
+			c.entries[key] = &entry[testItem]{
+				checkedAt: base.Add(-time.Duration(i) * time.Millisecond),
+				ttl:       time.Hour,
+			}
+		}
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		build()
+		b.StartTimer()
+
+		c.removeOldestEntries(base)
+	}
+}

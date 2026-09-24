@@ -196,13 +196,9 @@ func tryTextUnmarshaler(field reflect.Value, name, raw string, o *loadOptions, e
 
 // setDuration parses a time.Duration override (for example "30s" or "5m").
 func setDuration(field reflect.Value, name, raw string, o *loadOptions, errs *[]error) {
-	d, err := time.ParseDuration(raw)
-	if err != nil {
-		report(o, errs, name, raw, err)
-		return
+	if d, ok := parseOrReport(name, raw, o, errs, time.ParseDuration); ok {
+		field.SetInt(int64(d))
 	}
-
-	field.SetInt(int64(d))
 }
 
 // setScalar assigns a raw value based on the field's reflect.Kind. Parse and
@@ -231,48 +227,38 @@ func setScalar(field reflect.Value, name, raw string, o *loadOptions, errs *[]er
 
 // setBool parses a boolean override (1, t, T, TRUE, true, etc.).
 func setBool(field reflect.Value, name, raw string, o *loadOptions, errs *[]error) {
-	b, err := strconv.ParseBool(raw)
-	if err != nil {
-		report(o, errs, name, raw, err)
-		return
+	if b, ok := parseOrReport(name, raw, o, errs, strconv.ParseBool); ok {
+		field.SetBool(b)
 	}
-
-	field.SetBool(b)
 }
 
 // setInt parses a signed integer override and guards against overflow for the
 // field's specific width.
 func setInt(field reflect.Value, name, raw string, o *loadOptions, errs *[]error) {
-	n, err := strconv.ParseInt(raw, 10, field.Type().Bits())
-	if err != nil {
-		report(o, errs, name, raw, err)
-		return
+	if n, ok := parseOrReport(name, raw, o, errs, func(s string) (int64, error) {
+		return strconv.ParseInt(s, 10, field.Type().Bits())
+	}); ok {
+		field.SetInt(n)
 	}
-
-	field.SetInt(n)
 }
 
 // setUint parses an unsigned integer override and guards against overflow for the
 // field's specific width.
 func setUint(field reflect.Value, name, raw string, o *loadOptions, errs *[]error) {
-	n, err := strconv.ParseUint(raw, 10, field.Type().Bits())
-	if err != nil {
-		report(o, errs, name, raw, err)
-		return
+	if n, ok := parseOrReport(name, raw, o, errs, func(s string) (uint64, error) {
+		return strconv.ParseUint(s, 10, field.Type().Bits())
+	}); ok {
+		field.SetUint(n)
 	}
-
-	field.SetUint(n)
 }
 
 // setFloat parses a floating-point override.
 func setFloat(field reflect.Value, name, raw string, o *loadOptions, errs *[]error) {
-	f, err := strconv.ParseFloat(raw, field.Type().Bits())
-	if err != nil {
-		report(o, errs, name, raw, err)
-		return
+	if f, ok := parseOrReport(name, raw, o, errs, func(s string) (float64, error) {
+		return strconv.ParseFloat(s, field.Type().Bits())
+	}); ok {
+		field.SetFloat(f)
 	}
-
-	field.SetFloat(f)
 }
 
 // report records a malformed value: it returns an error in strict mode or logs a
@@ -285,6 +271,23 @@ func report(o *loadOptions, errs *[]error, name, raw string, err error) {
 
 	o.logger.Warn("config: ignoring invalid environment override",
 		"var", name, "value", raw, "err", err)
+}
+
+// parseOrReport parses raw with parse; on failure it routes the error through
+// report (honoring strict/lenient mode) and returns ok=false so the caller skips
+// assignment. It centralizes the shared parse-or-report branch of the scalar
+// setters.
+func parseOrReport[T any](name, raw string, o *loadOptions, errs *[]error, parse func(string) (T, error)) (T, bool) {
+	v, err := parse(raw)
+	if err != nil {
+		report(o, errs, name, raw, err)
+
+		var zero T
+
+		return zero, false
+	}
+
+	return v, true
 }
 
 // splitCommaList splits a comma-separated value into a trimmed, empty-free slice.

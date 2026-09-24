@@ -68,20 +68,25 @@ func VerifySQLitePragmas(gdb *gorm.DB) error {
 	return nil
 }
 
+// sqlitePragma reads a single-valued PRAGMA from gdb into a T. The pragma name is
+// a caller-controlled constant, not user input.
+func sqlitePragma[T any](gdb *gorm.DB, name string) (T, error) {
+	var v T
+	err := gdb.Raw("PRAGMA " + name).Row().Scan(&v)
+
+	return v, err
+}
+
 // SQLitePragmaString reads a text-valued PRAGMA from gdb (for example
 // journal_mode). The pragma name is a caller-controlled constant, not user
 // input.
 func SQLitePragmaString(gdb *gorm.DB, name string) (string, error) {
-	var v string
-	err := gdb.Raw("PRAGMA " + name).Row().Scan(&v)
-	return v, err
+	return sqlitePragma[string](gdb, name)
 }
 
 // SQLitePragmaInt reads an integer-valued PRAGMA from gdb (for example
 // busy_timeout or synchronous). The pragma name is a caller-controlled constant,
 // not user input.
 func SQLitePragmaInt(gdb *gorm.DB, name string) (int, error) {
-	var v int
-	err := gdb.Raw("PRAGMA " + name).Row().Scan(&v)
-	return v, err
+	return sqlitePragma[int](gdb, name)
 }

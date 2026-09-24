@@ -129,6 +129,18 @@ func TestMockProvider_GetAllSecrets(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "result", all["custom"])
 	})
+
+	t.Run("returns non-nil empty map when Secrets is nil", func(t *testing.T) {
+		// A zero-value MockProvider (or NewMockProviderWithSecrets(nil)) has a
+		// nil Secrets map; GetAllSecrets must still return a non-nil, empty map.
+		mock := secrets.NewMockProviderWithSecrets(nil)
+
+		all, err := mock.GetAllSecrets(ctx)
+
+		require.NoError(t, err)
+		assert.NotNil(t, all)
+		assert.Empty(t, all)
+	})
 }
 
 func TestMockProvider_CallCounts(t *testing.T) {

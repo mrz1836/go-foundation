@@ -293,6 +293,21 @@ func wrapValidationError(err error) (bool, error) {
 	return false, nil
 }
 
+// classifyConstraintError wraps msg with the sentinel matching the detected
+// constraint kind: ErrDuplicateKey for a unique/primary-key violation,
+// ErrForeignKey for a foreign-key violation, and ErrDatabaseError otherwise. It
+// centralizes the three-way error construction shared by every driver matcher.
+func classifyConstraintError(unique, fk bool, msg string) error {
+	switch {
+	case unique:
+		return fmt.Errorf("%w: %s", ErrDuplicateKey, msg)
+	case fk:
+		return fmt.Errorf("%w: %s", ErrForeignKey, msg)
+	default:
+		return fmt.Errorf("%w: %s", ErrDatabaseError, msg)
+	}
+}
+
 // wrapPgError matches PostgreSQL (pgx) errors via SQLSTATE codes, which are
 // stable across driver versions.
 func wrapPgError(err error) (bool, error) {
@@ -301,14 +316,11 @@ func wrapPgError(err error) (bool, error) {
 		return false, nil
 	}
 
-	switch pgErr.Code {
-	case pgCodeUniqueViolation:
-		return true, fmt.Errorf("%w: %s", ErrDuplicateKey, pgErr.Message)
-	case pgCodeForeignKeyViolation:
-		return true, fmt.Errorf("%w: %s", ErrForeignKey, pgErr.Message)
-	}
-
-	return true, fmt.Errorf("%w: %s", ErrDatabaseError, pgErr.Message)
+	return true, classifyConstraintError(
+		pgErr.Code == pgCodeUniqueViolation,
+		pgErr.Code == pgCodeForeignKeyViolation,
+		pgErr.Message,
+	)
 }
 
 // wrapSqliteError matches SQLite errors by their extended result code, exposed
@@ -323,14 +335,13 @@ func wrapSqliteError(err error) (bool, error) {
 		return false, nil
 	}
 
-	switch coder.Code() {
-	case sqliteConstraintUnique, sqliteConstraintPrimaryKey:
-		return true, fmt.Errorf("%w: %s", ErrDuplicateKey, err.Error())
-	case sqliteConstraintForeignKey:
-		return true, fmt.Errorf("%w: %s", ErrForeignKey, err.Error())
-	}
+	code := coder.Code()
 
-	return true, fmt.Errorf("%w: %s", ErrDatabaseError, err.Error())
+	return true, classifyConstraintError(
+		code == sqliteConstraintUnique || code == sqliteConstraintPrimaryKey,
+		code == sqliteConstraintForeignKey,
+		err.Error(),
+	)
 }
 
 // wrapByMessage is a defensive fallback for unwrapped driver errors. The
@@ -338,19 +349,19 @@ func wrapSqliteError(err error) (bool, error) {
 // typed match.
 func wrapByMessage(err error) error {
 	errStr := err.Error()
-	if strings.Contains(errStr, "UNIQUE constraint failed") ||
-		strings.Contains(errStr, "duplicate key value violates unique constraint") {
+	unique := strings.Contains(errStr, "UNIQUE constraint failed") ||
+		strings.Contains(errStr, "duplicate key value violates unique constraint")
+	fk := strings.Contains(errStr, "FOREIGN KEY constraint failed") ||
+		strings.Contains(errStr, "violates foreign key constraint")
+
+	switch {
+	case unique:
 		slog.Warn("models.WrapDBError: matched unique violation by string; driver error not unwrapped", "err", errStr)
-		return fmt.Errorf("%w: %s", ErrDuplicateKey, errStr)
-	}
-
-	if strings.Contains(errStr, "FOREIGN KEY constraint failed") ||
-		strings.Contains(errStr, "violates foreign key constraint") {
+	case fk:
 		slog.Warn("models.WrapDBError: matched FK violation by string; driver error not unwrapped", "err", errStr)
-		return fmt.Errorf("%w: %s", ErrForeignKey, errStr)
 	}
 
-	return fmt.Errorf("%w: %s", ErrDatabaseError, errStr)
+	return classifyConstraintError(unique, fk, errStr)
 }
 
 // ValidateUUID checks if the given string is a valid UUID.

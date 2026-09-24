@@ -29,7 +29,7 @@ func WriteJSON(w http.ResponseWriter, status int, data any) {
 		slog.Error("httputil: failed to marshal JSON response", slog.Any("error", err))
 		w.Header().Set(constants.HeaderContentType, constants.ContentTypeJSON)
 		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(`{"error":"` + constants.ErrorMessageEncodingFailed + `","code":"` + constants.ErrorCodeInternalError + `"}`))
+		_, _ = w.Write([]byte(constants.StaticErrorJSON(constants.ErrorMessageEncodingFailed, constants.ErrorCodeInternalError)))
 
 		return
 	}

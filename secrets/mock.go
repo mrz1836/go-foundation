@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"context"
+	"maps"
 	"sync/atomic"
 )
 
@@ -71,13 +72,14 @@ func (m *MockProvider) GetAllSecrets(ctx context.Context) (map[string]string, er
 		return m.GetAllSecretsFunc(ctx)
 	}
 
-	// Return a copy to prevent external modification
-	result := make(map[string]string, len(m.Secrets))
-	for k, v := range m.Secrets {
-		result[k] = v
+	// Return a copy to prevent external modification. m.Secrets may be nil (zero
+	// value or NewMockProviderWithSecrets(nil)); guard to keep returning a
+	// non-nil map, since maps.Clone(nil) is nil.
+	if m.Secrets == nil {
+		return map[string]string{}, nil
 	}
 
-	return result, nil
+	return maps.Clone(m.Secrets), nil
 }
 
 // GetSecretCallCount returns the number of times GetSecret was called.

@@ -1,6 +1,10 @@
 package ctxutil
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/mrz1836/go-foundation/constants"
+)
 
 // RequestIDToMetadata returns a JSON object blob (always non-empty) carrying the
 // request id under the "request_id" key. base, when non-empty, is merged in
@@ -19,7 +23,7 @@ func RequestIDToMetadata(base []byte, requestID string) []byte {
 		_ = json.Unmarshal(base, &m)
 	}
 	if requestID != "" {
-		m["request_id"] = requestID
+		m[constants.FieldRequestID] = requestID
 	}
 	out, err := json.Marshal(m)
 	if err != nil || len(out) == 0 {
@@ -36,6 +40,8 @@ func RequestIDFromMetadata(raw []byte) string {
 	if len(raw) == 0 {
 		return ""
 	}
+	// The struct tag must stay a literal (Go tags cannot reference a constant);
+	// it must match constants.FieldRequestID.
 	var m struct {
 		RequestID string `json:"request_id"`
 	}

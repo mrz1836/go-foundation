@@ -14,6 +14,18 @@ const (
 
 	// HeaderAccessControlAllowOrigin is the CORS Access-Control-Allow-Origin header
 	HeaderAccessControlAllowOrigin = "Access-Control-Allow-Origin"
+
+	// HeaderXRequestID is the primary request-id header set by clients/gateways
+	HeaderXRequestID = "X-Request-ID"
+
+	// HeaderXAmznRequestID is the API Gateway / AWS request-id header
+	HeaderXAmznRequestID = "X-Amzn-Request-Id"
+)
+
+// Structured-log and metadata field names
+const (
+	// FieldRequestID is the log attribute and JSON metadata key for the request id
+	FieldRequestID = "request_id"
 )
 
 // Content Type Values
@@ -84,3 +96,11 @@ const (
 	// ErrorMessageTooManyRequests is the message for 429 errors
 	ErrorMessageTooManyRequests = "Too many requests, please try again later"
 )
+
+// StaticErrorJSON assembles the minimal {"error":..,"code":..} body used as a
+// last-resort fallback when the normal JSON marshaler is unavailable (a marshal
+// failure). message and code must be free of characters that require JSON
+// escaping; the error constants in this package satisfy that.
+func StaticErrorJSON(message, code string) string {
+	return `{"error":"` + message + `","code":"` + code + `"}`
+}

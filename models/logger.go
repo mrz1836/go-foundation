@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"time"
+
+	"github.com/mrz1836/go-foundation/constants"
 )
 
 // DBLogger defines an interface for database operation logging.
@@ -69,7 +71,7 @@ func (l *DefaultDBLogger) LogOperation(ctx context.Context, op DBOperation) {
 	}
 
 	if op.RequestID != "" {
-		attrs = append(attrs, slog.String("request_id", op.RequestID))
+		attrs = append(attrs, slog.String(constants.FieldRequestID, op.RequestID))
 	}
 
 	level := slog.LevelInfo

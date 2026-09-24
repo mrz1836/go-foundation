@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"runtime/debug"
 
+	"github.com/mrz1836/go-foundation/constants"
 	"github.com/mrz1836/go-foundation/httputil"
 )
 
@@ -35,7 +36,7 @@ func handlePanic(w http.ResponseWriter, r *http.Request, rec any) {
 	slog.Error(
 		"panic recovered",
 		slog.String("type", "panic"),
-		slog.String("request_id", reqID),
+		slog.String(constants.FieldRequestID, reqID),
 		slog.String("error", fmt.Sprintf("%v", rec)),
 		slog.String("stack", string(stack)),
 	)

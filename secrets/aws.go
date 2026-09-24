@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -89,13 +90,13 @@ func (p *AWSProvider) GetAllSecrets(ctx context.Context) (map[string]string, err
 		return nil, p.cacheErr
 	}
 
-	// Return a copy to prevent external modification of cache
-	result := make(map[string]string, len(p.cache))
-	for k, v := range p.cache {
-		result[k] = v
+	// Return a copy to prevent external modification of cache. A JSON "null"
+	// secret parses to a nil cache, so guard to keep returning a non-nil map.
+	if p.cache == nil {
+		return map[string]string{}, nil
 	}
 
-	return result, nil
+	return maps.Clone(p.cache), nil
 }
 
 // Refresh clears the cache and forces a refresh on the next GetSecret call.

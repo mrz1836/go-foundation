@@ -2,6 +2,28 @@ package models
 
 import "strings"
 
+// Latitude/longitude bounds (WGS84 degrees) shared by the coordinate validators.
+const (
+	minLatitude  = -90.0
+	maxLatitude  = 90.0
+	minLongitude = -180.0
+	maxLongitude = 180.0
+)
+
+// validateLatLon validates a latitude/longitude pair against the WGS84 bounds,
+// returning a ValidationError naming the first out-of-range field.
+func validateLatLon(lat, lon float64) error {
+	if lat < minLatitude || lat > maxLatitude {
+		return NewValidationError("latitude", "must be between -90 and 90")
+	}
+
+	if lon < minLongitude || lon > maxLongitude {
+		return NewValidationError("longitude", "must be between -180 and 180")
+	}
+
+	return nil
+}
+
 // ValidateRequired trims and validates a required string field.
 // Returns the trimmed value and a validation error if empty.
 func ValidateRequired(value, fieldName string) (string, error) {
@@ -15,16 +37,17 @@ func ValidateRequired(value, fieldName string) (string, error) {
 
 // ValidateCoordinates validates latitude and longitude if provided.
 // Latitude must be between -90 and 90, longitude between -180 and 180.
+// A nil pointer is treated as unset (and therefore valid).
 func ValidateCoordinates(lat, lon *float64) error {
-	if lat != nil && (*lat < -90 || *lat > 90) {
-		return NewValidationError("latitude", "must be between -90 and 90")
+	la, lo := 0.0, 0.0 // 0,0 is in range, so an unset field never trips the check
+	if lat != nil {
+		la = *lat
+	}
+	if lon != nil {
+		lo = *lon
 	}
 
-	if lon != nil && (*lon < -180 || *lon > 180) {
-		return NewValidationError("longitude", "must be between -180 and 180")
-	}
-
-	return nil
+	return validateLatLon(la, lo)
 }
 
 // ValidateNonNegative validates an int64 pointer is non-negative.

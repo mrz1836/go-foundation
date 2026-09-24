@@ -163,7 +163,7 @@ func toHTTPRequest(ctx context.Context, event events.APIGatewayV2HTTPRequest) (*
 	// Forward the API Gateway request ID so LoggingMiddleware and error
 	// responses can include it without requiring Lambda-specific imports.
 	if reqID := event.RequestContext.RequestID; reqID != "" {
-		req.Header.Set("X-Request-ID", reqID)
+		req.Header.Set(constants.HeaderXRequestID, reqID)
 	}
 
 	return req, nil
@@ -187,7 +187,7 @@ func ServeHTTP(
 
 		body := string(errResp)
 		if marshalErr != nil {
-			body = `{"error":"` + constants.ErrorMessageInternalError + `","code":"` + constants.ErrorCodeInternalError + `"}`
+			body = constants.StaticErrorJSON(constants.ErrorMessageInternalError, constants.ErrorCodeInternalError)
 		}
 
 		return events.APIGatewayV2HTTPResponse{

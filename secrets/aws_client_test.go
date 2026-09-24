@@ -116,6 +116,19 @@ func TestAWSProvider_GetAllSecrets_InvalidJSON(t *testing.T) {
 	require.ErrorIs(t, err, secrets.ErrInvalidSecretFormat)
 }
 
+func TestAWSProvider_GetAllSecrets_NullSecret(t *testing.T) {
+	t.Parallel()
+
+	// A SecretString of literal JSON null parses to a nil map with no error;
+	// GetAllSecrets must still return a non-nil, empty map.
+	provider, _ := newStubbedAWSProvider(t, http.StatusOK, `{"SecretString":"null"}`)
+
+	all, err := provider.GetAllSecrets(context.Background())
+	require.NoError(t, err)
+	assert.NotNil(t, all)
+	assert.Empty(t, all)
+}
+
 func TestAWSProvider_GetAllSecrets_APIError(t *testing.T) {
 	t.Parallel()
 

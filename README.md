@@ -272,14 +272,15 @@ Every benchmark in the module, linked to its source. The name links jump straigh
 
 | Package | Benchmark | Measures |
 |---------|-----------|----------|
-| `backoff` | [Exponential ladder](backoff/backoff_test.go#L86) | Retry delay at attempts 1 / 5 / 30 |
-| `cache` | [Cache hit](cache/cache_test.go#L799) | Revalidating an already-cached secret (fast path) |
-| `cache` | [Cache miss](cache/cache_test.go#L816) | Validating an unknown secret (loader + match scan) |
-| `cache` | [Parallel reads](cache/cache_test.go#L831) | Concurrent cache hits under the read lock |
-| `cache` | [Eviction](cache/cache_test.go#L853) | Evicting the oldest ~10% of a full cache |
+| `backoff` | [Exponential ladder](backoff/backoff_test.go#L102) | Retry delay at attempts 1 / 5 / 30 |
+| `cache` | [Cache hit](cache/cache_test.go#L865) | Revalidating an already-cached secret (fast path) |
+| `cache` | [Cache miss](cache/cache_test.go#L882) | Validating an unknown secret (loader + match scan) |
+| `cache` | [Parallel reads](cache/cache_test.go#L897) | Concurrent cache hits under the read lock |
+| `cache` | [Parallel mixed](cache/cache_test.go#L937) | Concurrent hits + occasional costly-scan miss (lock-free scan) |
+| `cache` | [Eviction](cache/cache_test.go#L974) | Evicting the oldest ~10% of a full cache |
 | `config` | [Load from env](config/load_test.go#L298) | Reflection-based env binding into a config struct |
-| `ctxutil` | [Request ID → metadata](ctxutil/metadata_test.go#L127) | JSON merge + marshal on the request-id stamping path |
-| `ctxutil` | [Request ID ← metadata](ctxutil/metadata_test.go#L139) | JSON unmarshal on the request-id extraction path |
+| `ctxutil` | [Request ID → metadata](ctxutil/metadata_test.go#L175) | JSON merge + marshal on the request-id stamping path |
+| `ctxutil` | [Request ID ← metadata](ctxutil/metadata_test.go#L187) | JSON unmarshal on the request-id extraction path |
 | `httputil` | [Write JSON](httputil/httputil_test.go#L196) | Marshal + write of a JSON response body |
 | `lambda` | [API Gateway → net/http](lambda/adapter_test.go#L282) | Full request/response adapter round-trip |
 | `middleware` | [Logging · large 200](middleware/logging_test.go#L481) | Logging a large successful response body |
@@ -287,6 +288,7 @@ Every benchmark in the module, linked to its source. The name links jump straigh
 | `middleware` | [Logging · error response](middleware/logging_test.go#L543) | Capturing + logging a 4xx/5xx body |
 | `models` | [Normalize email](models/email_test.go#L198) | Email parse + normalization |
 | `models` | [Normalize phone](models/phone_test.go#L78) | Phone parse + normalization |
+| `models` | [Generate slug](models/slug_test.go#L83) | URL-slug transform (package-scoped regexes) |
 | `pagination` | [Encode cursor](pagination/pagination_test.go#L102) | Encoding a timestamp cursor |
 | `pagination` | [Decode cursor](pagination/pagination_test.go#L112) | Decoding a cursor string |
 | `recurrence` | [Parse HH:MM](recurrence/recurrence_internal_test.go#L51) | Hand-rolled start-time parse (hot path) |
@@ -319,27 +321,29 @@ Absolute `ns/op` depends on the host, so treat the numbers below as a **point-in
 | Benchmark | ns/op | B/op | allocs/op |
 |-----------|------:|-----:|----------:|
 | Exponential ladder (attempt=1) | 0.63 | 0 | 0 |
-| Exponential ladder (attempt=5) | 2.55 | 0 | 0 |
-| Exponential ladder (attempt=30) | 3.83 | 0 | 0 |
-| Cache hit | 156 | 128 | 2 |
-| Cache miss | 190 | 152 | 3 |
-| Parallel reads | 153 | 128 | 2 |
-| Eviction | 507,752 | 122,880 | 1 |
-| Load from env | 3,836 | 1,440 | 37 |
-| Request ID → metadata | 909 | 593 | 16 |
-| Request ID ← metadata | 279 | 16 | 1 |
-| Write JSON | 716 | 1,129 | 15 |
-| API Gateway → net/http | 818 | 1,640 | 17 |
-| Logging · large 200 | 491,184 | 10,493,671 | 34 |
-| Logging · request path | 3,418 | 6,872 | 36 |
-| Logging · error response | 3,958 | 7,222 | 43 |
-| Normalize email | 641 | 208 | 9 |
-| Normalize phone | 577 | 73 | 5 |
-| Encode cursor | 17.9 | 16 | 1 |
-| Decode cursor | 23.2 | 16 | 1 |
-| Parse HH:MM | 24.5 | 0 | 0 |
-| Parse pattern | 334 | 48 | 1 |
-| Next occurrence | 408 | 48 | 1 |
+| Exponential ladder (attempt=5) | 4.99 | 0 | 0 |
+| Exponential ladder (attempt=30) | 6.57 | 0 | 0 |
+| Cache hit | 174 | 160 | 3 |
+| Cache miss | 188 | 152 | 3 |
+| Parallel reads | 154 | 160 | 3 |
+| Parallel mixed | 2,833 | 167 | 3 |
+| Eviction | 500,684 | 122,880 | 1 |
+| Load from env | 3,957 | 1,440 | 37 |
+| Request ID → metadata | 903 | 593 | 16 |
+| Request ID ← metadata | 278 | 16 | 1 |
+| Write JSON | 783 | 1,129 | 15 |
+| API Gateway → net/http | 688 | 1,448 | 15 |
+| Logging · large 200 | 510,092 | 10,493,183 | 22 |
+| Logging · request path | 3,234 | 6,295 | 24 |
+| Logging · error response | 3,656 | 6,402 | 29 |
+| Normalize email | 653 | 208 | 9 |
+| Normalize phone | 195 | 32 | 2 |
+| Generate slug | 1,812 | 518 | 15 |
+| Encode cursor | 16.8 | 16 | 1 |
+| Decode cursor | 22.8 | 16 | 1 |
+| Parse HH:MM | 24.0 | 0 | 0 |
+| Parse pattern | 329 | 48 | 1 |
+| Next occurrence | 395 | 48 | 1 |
 
 </details>
 

@@ -279,6 +279,64 @@ func TestServeHTTP_SetCookieNotCommaJoined(t *testing.T) {
 	assert.Equal(t, "pref=dark; Path=/", resp.Cookies[1])
 }
 
+func TestServeHTTP_RemoteAddrFromSourceIP(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		sourceIP string
+		headers  map[string]string
+		want     string
+	}{
+		{
+			name:     "ipv4",
+			sourceIP: "203.0.113.7",
+			headers:  map[string]string{"X-Forwarded-For": "1.2.3.4, 203.0.113.7"},
+			want:     "203.0.113.7:0",
+		},
+		{
+			name:     "ipv6",
+			sourceIP: "2001:db8::1",
+			want:     "[2001:db8::1]:0",
+		},
+		{
+			name:     "empty source ip leaves RemoteAddr unset",
+			sourceIP: "",
+			want:     "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var got string
+
+			captureHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				got = r.RemoteAddr
+
+				w.WriteHeader(http.StatusOK)
+			})
+
+			event := events.APIGatewayV2HTTPRequest{
+				RawPath: "/client",
+				Headers: tt.headers,
+				RequestContext: events.APIGatewayV2HTTPRequestContext{
+					HTTP: events.APIGatewayV2HTTPRequestContextHTTPDescription{
+						Method:   "GET",
+						SourceIP: tt.sourceIP,
+					},
+				},
+			}
+
+			_, err := lambdahttp.ServeHTTP(context.Background(), event, captureHandler)
+			require.NoError(t, err)
+
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
 func BenchmarkServeHTTP(b *testing.B) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

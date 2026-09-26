@@ -18,6 +18,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -108,9 +109,13 @@ func (w *lambdaResponseWriter) toAPIGatewayResponse() events.APIGatewayV2HTTPRes
 // toHTTPRequest converts an APIGatewayV2HTTPRequest to a standard *http.Request.
 // Headers, cookies, query parameters, and the request body (including base64-
 // encoded binary bodies) are all faithfully translated. The API Gateway request
-// ID is preserved as X-Request-ID for downstream middleware.
+// ID is preserved as X-Request-ID for downstream middleware. The caller's
+// source IP (requestContext.http.sourceIp, the address API Gateway observed on
+// the connection) becomes RemoteAddr as "host:0", so handlers can identify the
+// client from the transport rather than from client-supplied headers such as
+// X-Forwarded-For. RemoteAddr stays empty when the event carries no source IP.
 //
-//nolint:gocognit // HTTP request conversion requires multiple conditional branches
+//nolint:gocognit,gocyclo // HTTP request conversion requires multiple conditional branches
 func toHTTPRequest(ctx context.Context, event events.APIGatewayV2HTTPRequest) (*http.Request, error) {
 	rawPath := event.RawPath
 	if rawPath == "" {
@@ -159,6 +164,12 @@ func toHTTPRequest(ctx context.Context, event events.APIGatewayV2HTTPRequest) (*
 	// responses can include it without requiring Lambda-specific imports.
 	if reqID := event.RequestContext.RequestID; reqID != "" {
 		req.Header.Set(constants.HeaderXRequestID, reqID)
+	}
+
+	// Populate RemoteAddr from the connection-level source IP. The port is not
+	// known to API Gateway, so "0" keeps the value parseable by net.SplitHostPort.
+	if ip := event.RequestContext.HTTP.SourceIP; ip != "" {
+		req.RemoteAddr = net.JoinHostPort(ip, "0")
 	}
 
 	return req, nil

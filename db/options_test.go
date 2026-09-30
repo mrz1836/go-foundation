@@ -1,12 +1,17 @@
 package db
 
 import (
+	"bytes"
+	"encoding/json"
+	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 
 	"github.com/mrz1836/go-foundation/config"
 )
@@ -181,4 +186,87 @@ func TestNewConnection_OptionsPreservePoolConfig(t *testing.T) {
 
 	stats := sqlDB.Stats()
 	assert.Equal(t, 7, stats.MaxOpenConnections, "expected MaxOpenConnections=7 to be preserved")
+}
+
+// TestNewConnection_LoggerDefault verifies that without a logger option, or with a
+// nil one, the connection keeps GORM's default logger.
+func TestNewConnection_LoggerDefault(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		opts []Option
+	}{
+		{"no option", nil},
+		{"nil logger", []Option{WithLogger(nil)}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			database := newMemSQLite(t, tt.opts...)
+
+			assert.Same(t, gormlogger.Default, database.Logger, "expected GORM's default logger")
+		})
+	}
+}
+
+// TestNewConnection_LoggerInstalled verifies a supplied logger is the one the
+// connection logs through, and that a later WithLogger overrides an earlier one.
+func TestNewConnection_LoggerInstalled(t *testing.T) {
+	t.Parallel()
+
+	first := gormlogger.NewSlogLogger(slog.New(slog.DiscardHandler), gormlogger.Config{})
+	second := gormlogger.NewSlogLogger(slog.New(slog.DiscardHandler), gormlogger.Config{})
+
+	t.Run("supplied logger", func(t *testing.T) {
+		t.Parallel()
+
+		database := newMemSQLite(t, WithLogger(first))
+
+		assert.Same(t, first, database.Logger)
+	})
+
+	t.Run("last option wins", func(t *testing.T) {
+		t.Parallel()
+
+		database := newMemSQLite(t, WithLogger(first), WithLogger(second))
+
+		assert.Same(t, second, database.Logger)
+	})
+}
+
+// TestNewConnection_LoggerWithholdsBoundValues is the behavioral guard for the
+// recommended use: a slog JSON logger with ParameterizedQueries logs a statement as
+// a single JSON record whose SQL keeps its placeholder and carries no bound value.
+func TestNewConnection_LoggerWithholdsBoundValues(t *testing.T) {
+	t.Parallel()
+
+	const sentinel = "bound-value-sentinel@example.com"
+
+	var buf bytes.Buffer
+
+	database := newMemSQLite(t, WithLogger(gormlogger.NewSlogLogger(
+		slog.New(slog.NewJSONHandler(&buf, nil)),
+		gormlogger.Config{LogLevel: gormlogger.Info, ParameterizedQueries: true},
+	)))
+	buf.Reset() // assert on the query below only, not on anything logged at open
+
+	var n int64
+	require.NoError(t, database.Table("sqlite_master").Where("name = ?", sentinel).Count(&n).Error)
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	require.Len(t, lines, 1, "expected exactly one log record: %q", buf.String())
+
+	var record struct {
+		Msg   string `json:"msg"`
+		Trace struct {
+			SQL string `json:"sql"`
+		} `json:"trace"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(lines[0]), &record), "the record must be a JSON line")
+	assert.Equal(t, "SQL executed", record.Msg)
+	assert.Contains(t, record.Trace.SQL, "name = ?", "the logged SQL must keep its placeholder")
+	assert.NotContains(t, buf.String(), sentinel, "the bound value must never reach the log")
 }

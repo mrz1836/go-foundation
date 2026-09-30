@@ -1,6 +1,9 @@
 package db
 
-import "gorm.io/gorm"
+import (
+	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
+)
 
 // options holds the optional GORM behaviors a caller can toggle for a connection
 // built by NewConnection. The zero value preserves GORM's defaults, so a
@@ -8,6 +11,7 @@ import "gorm.io/gorm"
 type options struct {
 	skipDefaultTransaction bool
 	prepareStmt            bool
+	logger                 gormlogger.Interface
 }
 
 // Option configures an optional behavior applied to the gorm.Config a connection
@@ -45,6 +49,30 @@ func WithPrepareStmt(prepare bool) Option {
 	return func(o *options) { o.prepareStmt = prepare }
 }
 
+// WithLogger sets gorm.Config.Logger, the logger GORM reports statements and its own
+// messages through. A nil logger (the default) leaves GORM's default logger, which
+// writes colored text to stdout and inlines each statement's bound values into the
+// logged SQL.
+//
+// The logger is installed when the connection is opened, so GORM's open-time
+// messages (for example a failure to initialize the database) are routed through it
+// too, not only the statements that follow.
+//
+// To log statements as structured records without bound values, pass a slog-backed
+// logger with parameterized queries:
+//
+//	gormlogger.NewSlogLogger(slog.Default(), gormlogger.Config{
+//		SlowThreshold:        200 * time.Millisecond,
+//		LogLevel:             gormlogger.Warn,
+//		ParameterizedQueries: true,
+//	})
+//
+// With ParameterizedQueries set, the logged SQL keeps its placeholders ($1 or ?) and
+// carries none of the values bound to them.
+func WithLogger(l gormlogger.Interface) Option {
+	return func(o *options) { o.logger = l }
+}
+
 // resolveOptions folds opts into a single options value.
 func resolveOptions(opts []Option) options {
 	var resolved options
@@ -62,5 +90,6 @@ func (o options) gormConfig() *gorm.Config {
 	return &gorm.Config{
 		SkipDefaultTransaction: o.skipDefaultTransaction,
 		PrepareStmt:            o.prepareStmt,
+		Logger:                 o.logger,
 	}
 }

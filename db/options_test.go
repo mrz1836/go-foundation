@@ -2,6 +2,7 @@ package db
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"path/filepath"
@@ -269,4 +270,42 @@ func TestNewConnection_LoggerWithholdsBoundValues(t *testing.T) {
 	assert.Equal(t, "SQL executed", record.Msg)
 	assert.Contains(t, record.Trace.SQL, "name = ?", "the logged SQL must keep its placeholder")
 	assert.NotContains(t, buf.String(), sentinel, "the bound value must never reach the log")
+}
+
+// TestNewConnection_LoggerScanNeedsRecorderFilter pins the Scan caveat WithLogger
+// documents: GORM's Scan traces through a recorder that ignores this logger's
+// parameter filter, so its bound values reach the log until the process-wide
+// gormlogger.RecorderParamsFilter withholds them. It mutates that global, so it
+// must not run in parallel.
+func TestNewConnection_LoggerScanNeedsRecorderFilter(t *testing.T) {
+	const sentinel = "scan-sentinel@example.com"
+
+	var buf bytes.Buffer
+
+	database := newMemSQLite(t, WithLogger(gormlogger.NewSlogLogger(
+		slog.New(slog.NewJSONHandler(&buf, nil)),
+		gormlogger.Config{LogLevel: gormlogger.Info, ParameterizedQueries: true},
+	)))
+
+	scan := func() string {
+		buf.Reset()
+
+		var names []string
+		require.NoError(t, database.Table("sqlite_master").Select("name").Where("name = ?", sentinel).Scan(&names).Error)
+
+		return buf.String()
+	}
+
+	assert.Contains(t, scan(), sentinel,
+		"GORM's Scan no longer ignores the logger's filter: update the Scan caveat on WithLogger")
+
+	prev := gormlogger.RecorderParamsFilter
+	gormlogger.RecorderParamsFilter = func(_ context.Context, sql string, _ ...any) (string, []any) {
+		return sql, nil
+	}
+	t.Cleanup(func() { gormlogger.RecorderParamsFilter = prev })
+
+	logged := scan()
+	assert.Contains(t, logged, "name = ?", "the logged SQL must keep its placeholder")
+	assert.NotContains(t, logged, sentinel, "with the recorder filter set, Scan must withhold bound values")
 }

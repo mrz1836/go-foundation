@@ -67,8 +67,16 @@ func WithPrepareStmt(prepare bool) Option {
 //		ParameterizedQueries: true,
 //	})
 //
-// With ParameterizedQueries set, the logged SQL keeps its placeholders ($1 or ?) and
-// carries none of the values bound to them.
+// With ParameterizedQueries set, the logged SQL keeps its placeholders and carries
+// none of the values bound to them, with one exception inside GORM: Scan traces its
+// statement through a recorder that filters bound values with the process-wide
+// gormlogger.RecorderParamsFilter (a no-op by default) rather than with this
+// logger. To withhold values from Scan as well, set that filter once at startup,
+// before any connection is used:
+//
+//	gormlogger.RecorderParamsFilter = func(_ context.Context, sql string, _ ...any) (string, []any) {
+//		return sql, nil
+//	}
 func WithLogger(l gormlogger.Interface) Option {
 	return func(o *options) { o.logger = l }
 }

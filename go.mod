@@ -60,7 +60,7 @@ require (
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
-	github.com/klauspost/compress v1.20.0 // indirect
+	github.com/klauspost/compress v1.20.1 // indirect
 	github.com/lufia/plan9stats v0.0.0-20260802145828-341c2f0c90b5 // indirect
 	github.com/magiconair/properties v1.18.12 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
@@ -74,7 +74,7 @@ require (
 	github.com/moby/sys/user v0.4.1 // indirect
 	github.com/moby/sys/userns v0.2.1 // indirect
 	github.com/moby/term v0.5.2 // indirect
-	github.com/ncruces/go-strftime v1.0.0 // indirect
+	github.com/ncruces/go-strftime v1.1.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/power-devops/perfstat v0.0.0-20260916203055-22a1a467d9f0 // indirect
@@ -97,5 +97,5 @@ require (
 	modernc.org/libc v1.77.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
-	modernc.org/sqlite v1.59.0 // indirect
+	modernc.org/sqlite v1.60.1 // indirect
 )

@@ -347,7 +347,7 @@ Absolute `ns/op` depends on the host, so treat the numbers below as a **point-in
 | Parallel reads | 154 | 160 | 3 |
 | Parallel mixed | 2,833 | 167 | 3 |
 | Eviction | 500,684 | 122,880 | 1 |
-| Load from env | 3,957 | 1,440 | 37 |
+| Load from env | 3,901 | 1,320 | 37 |
 | SHA-256 hex (16 B) | 106 | 128 | 2 |
 | SHA-256 hex (4096 B) | 2,195 | 4,224 | 3 |
 | HMAC hex (16 B) | 379 | 656 | 9 |

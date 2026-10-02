@@ -92,17 +92,17 @@ type scoutConfig struct {
 }
 
 func TestLoadFromEnv_WalksEmbeddedAndNestedStructs(t *testing.T) {
-	t.Setenv("BEDROCK_DB_WRITE_HOST", "db.internal")
-	t.Setenv("BEDROCK_DB_WRITE_PORT", "5432")
-	t.Setenv("BEDROCK_APP_NAME", "bedrock-api")
-	t.Setenv("BEDROCK_ANTHROPIC_API_KEY", "sk-test")
+	t.Setenv("MYAPP_DB_WRITE_HOST", "db.internal")
+	t.Setenv("MYAPP_DB_WRITE_PORT", "5432")
+	t.Setenv("MYAPP_APP_NAME", "myapp-api")
+	t.Setenv("MYAPP_ANTHROPIC_API_KEY", "sk-test")
 
 	var cfg projectConfig
-	require.NoError(t, config.LoadFromEnv(&cfg, "BEDROCK_"))
+	require.NoError(t, config.LoadFromEnv(&cfg, "MYAPP_"))
 
 	assert.Equal(t, "db.internal", cfg.WriteDatabase.Host)
 	assert.Equal(t, 5432, cfg.WriteDatabase.Port)
-	assert.Equal(t, "bedrock-api", cfg.Application.Name)
+	assert.Equal(t, "myapp-api", cfg.Application.Name)
 	assert.Equal(t, "sk-test", cfg.Scout.APIKey)
 }
 
@@ -296,16 +296,16 @@ func FuzzLoadFromEnv(f *testing.F) {
 }
 
 func BenchmarkLoadFromEnv(b *testing.B) {
-	b.Setenv("BEDROCK_DB_WRITE_HOST", "db.internal")
-	b.Setenv("BEDROCK_DB_WRITE_PORT", "5432")
-	b.Setenv("BEDROCK_APP_NAME", "bedrock-api")
-	b.Setenv("BEDROCK_ANTHROPIC_API_KEY", "sk-test")
+	b.Setenv("MYAPP_DB_WRITE_HOST", "db.internal")
+	b.Setenv("MYAPP_DB_WRITE_PORT", "5432")
+	b.Setenv("MYAPP_APP_NAME", "myapp-api")
+	b.Setenv("MYAPP_ANTHROPIC_API_KEY", "sk-test")
 
 	b.ReportAllocs()
 	b.ResetTimer()
 
 	for range b.N {
 		var cfg projectConfig
-		_ = config.LoadFromEnv(&cfg, "BEDROCK_")
+		_ = config.LoadFromEnv(&cfg, "MYAPP_")
 	}
 }

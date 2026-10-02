@@ -176,6 +176,76 @@ func TestTemporalEdge_AppendOnlySupersession(t *testing.T) {
 	require.NotNil(t, asOf.SuppressedAt)
 }
 
+func TestVerificationStatus_ConstantValues(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, "unverified", models.VerificationStatusUnverified)
+	assert.Equal(t, "verified", models.VerificationStatusVerified)
+	assert.Equal(t, "disputed", models.VerificationStatusDisputed)
+	assert.Equal(t, "suppressed", models.VerificationStatusSuppressed)
+}
+
+func TestTemporalEdge_DefaultVerificationStatusIsUnverified(t *testing.T) {
+	t.Parallel()
+
+	db := newEdgeDB(t)
+
+	edge := &sampleEdge{TemporalEdge: models.TemporalEdge[sampleEdgeID]{
+		ValidFrom: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+	}}
+	require.NoError(t, db.Create(edge).Error)
+	assert.Equal(t, models.VerificationStatusUnverified, edge.VerificationStatus)
+
+	var stored sampleEdge
+	require.NoError(t, db.First(&stored, "id = ?", string(edge.ID)).Error)
+	assert.Equal(t, models.VerificationStatusUnverified, stored.VerificationStatus)
+}
+
+func TestActiveEdgePredicate_Value(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t,
+		"valid_to IS NULL AND superseded_by_id IS NULL AND suppressed_at IS NULL",
+		models.ActiveEdgePredicate)
+}
+
+func TestActiveEdgePredicate_SelectsOnlyActiveEdges(t *testing.T) {
+	t.Parallel()
+
+	db := newEdgeDB(t)
+	validFrom := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	at := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+
+	active := &sampleEdge{TemporalEdge: models.TemporalEdge[sampleEdgeID]{ValidFrom: validFrom}}
+	require.NoError(t, db.Create(active).Error)
+
+	successor := active.ID
+	for _, inactive := range []*sampleEdge{
+		{TemporalEdge: models.TemporalEdge[sampleEdgeID]{ValidFrom: validFrom, ValidTo: &at}},
+		{TemporalEdge: models.TemporalEdge[sampleEdgeID]{ValidFrom: validFrom, SupersededByID: &successor}},
+		{TemporalEdge: models.TemporalEdge[sampleEdgeID]{ValidFrom: validFrom, SuppressedAt: &at}},
+	} {
+		require.NoError(t, db.Create(inactive).Error)
+	}
+
+	var rows []sampleEdge
+	require.NoError(t, db.Where(models.ActiveEdgePredicate).Find(&rows).Error)
+	require.Len(t, rows, 1)
+	assert.Equal(t, active.ID, rows[0].ID)
+}
+
+func TestTemporalEdge_EdgeReturnsEmbeddedEdge(t *testing.T) {
+	t.Parallel()
+
+	edge := &sampleEdge{Label: "embedded"}
+	edge.Edge().Source = "written through Edge"
+	edge.Edge().ValidFrom = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	assert.Same(t, &edge.TemporalEdge, edge.Edge())
+	assert.Equal(t, "written through Edge", edge.Source)
+	assert.Equal(t, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), edge.ValidFrom)
+}
+
 func TestTemporalEdge_DoesNotEmbedBaseModel(t *testing.T) {
 	t.Parallel()
 

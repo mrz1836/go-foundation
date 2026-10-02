@@ -6,11 +6,21 @@ import (
 	"gorm.io/gorm"
 )
 
-// defaultVerificationStatus is the VerificationStatus assigned to an edge that
-// is written without one. The conventional set ("unverified", "verified",
-// "disputed", "suppressed") is enforced by code review, not by the storage
-// layer.
-const defaultVerificationStatus = "unverified"
+// The conventional TemporalEdge.VerificationStatus values. The storage layer
+// does not enforce the set; writers use these constants.
+const (
+	VerificationStatusUnverified = "unverified" // nothing has verified the value; the default
+	VerificationStatusVerified   = "verified"   // a verification step confirmed the value
+	VerificationStatusDisputed   = "disputed"   // a source or reviewer contests the value
+	VerificationStatusSuppressed = "suppressed" // a verification outcome that withholds the value; not SuppressedAt
+)
+
+// ActiveEdgePredicate is the SQL condition that selects active edges: not
+// ended, not superseded, and not suppressed. Its column names are
+// unqualified; qualify them when joining. A partial "active" index on an edge
+// table should use the same condition, so queries that filter on it can use
+// the index.
+const ActiveEdgePredicate = "valid_to IS NULL AND superseded_by_id IS NULL AND suppressed_at IS NULL"
 
 // TemporalEdge is the substrate for time-bounded relationships. Embed the
 // typed form in any edge model (ownership, lien, mailing intent, communication,
@@ -29,6 +39,9 @@ const defaultVerificationStatus = "unverified"
 // TemporalEdge does NOT embed BaseModel — entities and relationships are
 // independent substrates. Corrections are append-only (SupersededByID,
 // SuppressedAt), so it has no soft-delete and no metadata blob.
+//
+// Change an edge's lifecycle only with SupersedeEdge, EndEdge, or
+// SuppressEdge, never by updating its columns.
 type TemporalEdge[ID ~string] struct {
 	// ID is the UUID v7 primary key, minted on create when empty.
 	ID ID `gorm:"type:uuid;primaryKey" json:"id"`
@@ -48,16 +61,20 @@ type TemporalEdge[ID ~string] struct {
 	// source publishes none.
 	EventTime *time.Time `json:"event_time,omitempty"`
 
-	// SupersededByID points to the row that replaces this one after a correction.
+	// SupersededByID points to the row that replaces this one: a correction
+	// (SupersedeEdge) or a closed copy that records the edge's end (EndEdge).
 	SupersededByID *ID `gorm:"type:uuid" json:"superseded_by_id,omitempty"`
 
-	// SuppressedAt is set when the edge is operator-suppressed.
+	// SuppressedAt is set by SuppressEdge when the edge is taken down.
 	SuppressedAt *time.Time `json:"suppressed_at,omitempty"`
 
 	// Source is the human-readable adapter/source name.
 	Source string `json:"source"`
 
-	// ByteHash is the SHA-256 of the bronze byte range the edge derives from.
+	// ByteHash is the SHA-256 of what the edge derives from: the source bytes
+	// (or byte range) for a fetched fact, or the normalized value for one
+	// entered or proven first-hand. It may be empty when a hash would reveal
+	// the value.
 	ByteHash string `json:"byte_hash"`
 
 	// RuleVersion is the version of the derivation rule that produced the edge.
@@ -70,13 +87,18 @@ type TemporalEdge[ID ~string] struct {
 	// is distinct from a real 0.0 confidence.
 	Confidence *float64 `json:"confidence,omitempty"`
 
-	// VerificationStatus defaults to "unverified" when written empty.
+	// VerificationStatus defaults to VerificationStatusUnverified when written
+	// empty.
 	VerificationStatus string `json:"verification_status"`
 
 	// CreatedAt is the row insert time; equals RecordedAt unless backdated by
 	// replay tooling. Auto-defaulted to the context clock's now when zero.
 	CreatedAt time.Time `json:"created_at"`
 }
+
+// Edge returns e. A model that embeds TemporalEdge inherits it, which lets the
+// generic lifecycle helpers reach the edge fields of any such model.
+func (e *TemporalEdge[ID]) Edge() *TemporalEdge[ID] { return e }
 
 // BeforeCreate is the GORM hook that mints the ID and applies defaults. An
 // explicitly-set ID, RecordedAt, or CreatedAt is preserved so replay tooling
@@ -98,7 +120,7 @@ func (e *TemporalEdge[ID]) BeforeCreate(tx *gorm.DB) error {
 	}
 
 	if e.VerificationStatus == "" {
-		e.VerificationStatus = defaultVerificationStatus
+		e.VerificationStatus = VerificationStatusUnverified
 	}
 
 	return nil

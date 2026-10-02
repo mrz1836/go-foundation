@@ -28,6 +28,10 @@ var (
 
 	// ErrHook indicates a hook execution failed.
 	ErrHook = errors.New("hook error")
+
+	// ErrNoTransaction indicates that an operation which must run inside a database
+	// transaction was called with a context that carries none (see Transactor, WithTx).
+	ErrNoTransaction = errors.New("operation requires a transaction")
 )
 
 // ValidationError wraps ErrValidation with a specific message.

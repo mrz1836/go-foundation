@@ -117,7 +117,7 @@ naming. As the kit is assembled it exposes focused sub-packages:
 - **`jsonpath`** — address values in a decoded-JSON tree via a small JSONPath subset
 - **`lambda`** — AWS Lambda (API Gateway v2) ⇄ `net/http` adapter
 - **`middleware`** — logging, recovery, and request-ID HTTP middleware
-- **`models`** — generic `BaseModel`, `Repository`, `Clock`, and transaction helpers
+- **`models`** — generic `BaseModel`, `Repository`, and `TemporalEdge` with append-only lifecycle helpers (`SupersedeEdge`, `EndEdge`, `SuppressEdge`); `Clock` and transaction helpers; a civil `Date`; email, phone, and person-name normalizers
 - **`observability`** — structured logging initialization
 - **`pagination`** — cursor-based list pagination
 - **`ptr`** — generic pointer helpers (`To`, `Deref`, `DerefOr`)
@@ -301,6 +301,7 @@ Every benchmark in the module, linked to its source. The name links jump straigh
 | `middleware` | [Logging · error response](middleware/logging_test.go#L543) | Capturing + logging a 4xx/5xx body |
 | `models` | [Normalize email](models/email_test.go#L198) | Email parse + normalization |
 | `models` | [Normalize phone](models/phone_test.go#L78) | Phone parse + normalization |
+| `models` | [Normalize person name](models/person_name_test.go#L303) | NFC normalization + character-class and shape checks |
 | `models` | [Generate slug](models/slug_test.go#L83) | URL-slug transform (package-scoped regexes) |
 | `pagination` | [Encode cursor](pagination/pagination_test.go#L102) | Encoding a timestamp cursor |
 | `pagination` | [Decode cursor](pagination/pagination_test.go#L112) | Decoding a cursor string |
@@ -367,6 +368,7 @@ Absolute `ns/op` depends on the host, so treat the numbers below as a **point-in
 | Logging · error response | 3,656 | 6,402 | 29 |
 | Normalize email | 653 | 208 | 9 |
 | Normalize phone | 195 | 32 | 2 |
+| Normalize person name | 240 | 56 | 2 |
 | Generate slug | 1,812 | 518 | 15 |
 | Encode cursor | 16.8 | 16 | 1 |
 | Decode cursor | 22.8 | 16 | 1 |

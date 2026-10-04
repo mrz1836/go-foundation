@@ -70,6 +70,36 @@ func TestNormalizeEmailStandardizesHowPeopleWriteAddresses(t *testing.T) {
 	}
 }
 
+// TestNormalizeEmailMailboxKeepsTheDomainAsWritten: Mailbox is the address
+// mail is delivered to, normalized as Address is but without provider domain
+// aliases, which name another mailbox only for grouping.
+func TestNormalizeEmailMailboxKeepsTheDomainAsWritten(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name, raw, wantMailbox, wantAddress string
+	}{
+		{name: "a domain with no alias", raw: " <Jane.Doe+News@Example.COM> ", wantMailbox: "jane.doe+news@example.com", wantAddress: "jane.doe+news@example.com"},
+		{name: "googlemail.com", raw: "Ada@GoogleMail.com", wantMailbox: "ada@googlemail.com", wantAddress: "ada@gmail.com"},
+		{name: "ymail.com", raw: "jane@ymail.com", wantMailbox: "jane@ymail.com", wantAddress: "jane@yahoo.com"},
+		{name: "me.com", raw: "mailto:Jane@Me.com", wantMailbox: "jane@me.com", wantAddress: "jane@icloud.com"},
+		{name: "an internationalized domain", raw: "JÖHN@EXÄMPLE.COM", wantMailbox: "jöhn@xn--exmple-cua.com", wantAddress: "jöhn@xn--exmple-cua.com"},
+		{name: "a quoted local part", raw: `"Jane Doe"@GoogleMail.com`, wantMailbox: `"Jane Doe"@googlemail.com`, wantAddress: `"Jane Doe"@googlemail.com`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := models.NormalizeEmail(tc.raw)
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantMailbox, got.Mailbox)
+			assert.Equal(t, tc.wantAddress, got.Address)
+		})
+	}
+}
+
 // TestNormalizeEmailRefusesWhatIsWrong: input that isn't one address is
 // refused with a fixed message, whatever unwrapping leaves of it, and no
 // error includes the input.
@@ -196,5 +226,10 @@ func FuzzNormalizeEmailIsStable(f *testing.F) {
 		require.NoError(t, err, "%q normalized to %q, which is refused", raw, got.Address)
 		assert.Equal(t, got.Address, again.Address, "the address of %q normalizes to itself", raw)
 		assert.Equal(t, got.Root, again.Root, "the root of %q normalizes to itself", raw)
+
+		mailbox, err := models.NormalizeEmail(got.Mailbox)
+		require.NoError(t, err, "%q has the mailbox %q, which is refused", raw, got.Mailbox)
+		assert.Equal(t, got.Mailbox, mailbox.Mailbox, "the mailbox of %q normalizes to itself", raw)
+		assert.Equal(t, got.Address, mailbox.Address, "the mailbox of %q has the same address", raw)
 	})
 }

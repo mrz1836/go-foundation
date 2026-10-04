@@ -57,9 +57,29 @@
 //
 // # Normalizers
 //
-// NormalizeEmail, NormalizePhone, and NormalizePersonName validate and
+// NormalizeEmail, ParsePhone, and NormalizePersonName validate and
 // canonicalize the email addresses, phone numbers, and personal names people
 // type. They fail with a ValidationError that never includes the input.
+//
+// Input is flexible and output is standard. NormalizeEmail trims, folds case,
+// and removes the wrappers an address is pasted in (mailto:, enclosing angle
+// brackets or quotes, a trailing comma or semicolon); its options
+// (RejectQuotedLocal, RejectTrailingDot, RequireDottedDomain, or StrictEmail
+// for all three) refuse forms the broad RFC set allows. ParsePhone drops all
+// but the digits and plus signs (labels, punctuation, tel: and sms: schemes),
+// validates the number against its region's numbering plan, and returns its
+// E.164 and international forms; its options set a default region, require a
+// number in use (RequireValidNumber), or read keypad letters (KeypadLetters):
+//
+//	email, err := models.NormalizeEmail(" <Jane@Example.COM> ", models.StrictEmail())
+//	// email.Address == "jane@example.com"
+//
+//	phone, err := models.ParsePhone("Phone: (305) 555-0100",
+//	    models.WithDefaultRegion("US"), models.RequireValidNumber())
+//	// phone.E164 == "+13055550100", phone.International == "+1 305-555-0100"
+//
+// NormalizePhone, which checks only the shape of E.164, is deprecated in favor
+// of ParsePhone.
 //
 // # Civil dates
 //

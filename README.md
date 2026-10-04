@@ -117,7 +117,12 @@ naming. As the kit is assembled it exposes focused sub-packages:
 - **`jsonpath`** — address values in a decoded-JSON tree via a small JSONPath subset
 - **`lambda`** — AWS Lambda (API Gateway v2) ⇄ `net/http` adapter
 - **`middleware`** — logging, recovery, and request-ID HTTP middleware
-- **`models`** — generic `BaseModel`, `Repository`, and `TemporalEdge` with append-only lifecycle helpers (`SupersedeEdge`, `EndEdge`, `SuppressEdge`); `Clock` and transaction helpers; a civil `Date`; email, phone, and person-name normalizers
+- **`models`** — persistence building blocks and input validation:
+  - generic `BaseModel`, `Repository`, and `TemporalEdge` with append-only lifecycle helpers (`SupersedeEdge`, `EndEdge`, `SuppressEdge`); `Clock` and transaction helpers; a civil `Date`
+  - email, phone, and person-name validation that accepts the ways people write them and returns one standard form, with a `ValidationError` that never includes the input:
+    - `NormalizeEmail` — canonical address and alias root; unwraps `mailto:`, brackets, and quotes; strictness options (`StrictEmail`, `RejectQuotedLocal`, `RejectTrailingDot`, `RequireDottedDomain`)
+    - `ParsePhone` — validates against the region's numbering plan (libphonenumber) and returns E.164 and international forms; ignores labels, punctuation, and `tel:`/`sms:` schemes; options for a default region, numbers in use only, and keypad letters
+    - `NormalizePersonName` — NFC normalization with character-class and shape checks
 - **`observability`** — structured logging initialization
 - **`pagination`** — cursor-based list pagination
 - **`ptr`** — generic pointer helpers (`To`, `Deref`, `DerefOr`)
@@ -300,7 +305,9 @@ Every benchmark in the module, linked to its source. The name links jump straigh
 | `middleware` | [Logging · request path](middleware/logging_test.go#L512) | Request/response log pair on the happy path |
 | `middleware` | [Logging · error response](middleware/logging_test.go#L543) | Capturing + logging a 4xx/5xx body |
 | `models` | [Normalize email](models/email_test.go#L198) | Email parse + normalization |
-| `models` | [Normalize phone](models/phone_test.go#L78) | Phone parse + normalization |
+| `models` | [Normalize email · strict](models/email_options_test.go#L91) | Email parse + normalization with `StrictEmail` |
+| `models` | [Normalize phone](models/phone_test.go#L78) | Regex-only E.164 normalization (deprecated) |
+| `models` | [Parse phone](models/phone_parse_test.go#L311) | Sanitizing + numbering-plan parse of a formatted national number |
 | `models` | [Normalize person name](models/person_name_test.go#L303) | NFC normalization + character-class and shape checks |
 | `models` | [Generate slug](models/slug_test.go#L83) | URL-slug transform (package-scoped regexes) |
 | `pagination` | [Encode cursor](pagination/pagination_test.go#L102) | Encoding a timestamp cursor |
@@ -367,7 +374,9 @@ Absolute `ns/op` depends on the host, so treat the numbers below as a **point-in
 | Logging · request path | 3,234 | 6,295 | 24 |
 | Logging · error response | 3,656 | 6,402 | 29 |
 | Normalize email | 653 | 208 | 9 |
+| Normalize email · strict ¹ | 690 | 216 | 10 |
 | Normalize phone | 195 | 32 | 2 |
+| Parse phone ¹ | 21,700 | 11,250 | 165 |
 | Normalize person name | 240 | 56 | 2 |
 | Generate slug | 1,812 | 518 | 15 |
 | Encode cursor | 16.8 | 16 | 1 |
@@ -383,6 +392,8 @@ Absolute `ns/op` depends on the host, so treat the numbers below as a **point-in
 | Intersect (4096 elems) | 72,090 | 180,544 | 18 |
 | Render (3 placeholders) | 457 | 32 | 3 |
 | Render (192 placeholders) | 28,526 | 1,551 | 9 |
+
+¹ Measured on 2026-10-04, on the same machine and Go version.
 
 </details>
 

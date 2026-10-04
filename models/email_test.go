@@ -77,7 +77,7 @@ func TestNormalizeEmail(t *testing.T) {
 		{name: "trailing dot in local rejected", input: "trailing.@example.com", wantErr: true},
 		{name: "consecutive dots unquoted rejected", input: "double..dot@example.com", wantErr: true},
 		{name: "display-name form rejected", input: "Jane <jane@example.com>", wantErr: true},
-		{name: "bare angle brackets rejected", input: "<jane@example.com>", wantErr: true},
+		{name: "bare angle brackets unwrapped", input: "<jane@example.com>", wantAddr: "jane@example.com", wantRoot: "jane@example.com", wantDomain: "example.com"},
 		{name: "local too long", input: oneA65 + "@example.com", wantErr: true},
 		{name: "total too long", input: addr255, wantErr: true},
 

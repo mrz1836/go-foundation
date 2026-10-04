@@ -26,14 +26,22 @@ const (
 	msgEmailSingleLabel  = "must have a dot in its domain"
 )
 
-// NormalizedEmail is the result of NormalizeEmail. It carries both the
-// per-row canonical form (Address) used as the storage key and the
-// alias-collapsed Root used to group equivalent mailboxes (e.g. Gmail's
-// plus-tags and dot-insensitivity).
+// NormalizedEmail is the result of NormalizeEmail. It carries the mailbox
+// the address names (Mailbox), the per-row canonical form (Address) used as the
+// storage key, and the alias-collapsed Root used to group equivalent mailboxes
+// (e.g. Gmail's plus-tags and dot-insensitivity).
 type NormalizedEmail struct {
+	// Mailbox is the address mail is delivered to, normalized: the
+	// PRECIS-folded local part and the lowercased ASCII (IDN Punycode) domain
+	// the input named, before provider domain aliases. It differs from Address
+	// only for an aliased domain (jane@googlemail.com, whose Address is
+	// jane@gmail.com). Send mail, and match the address a person typed, by
+	// Mailbox: an aliased domain need not deliver to the same inbox.
+	Mailbox string
 	// Address is the canonical per-row form: lowercased ASCII domain (IDN
-	// Punycode), PRECIS-folded local part. Plus tags are preserved here.
-	// Quoted local parts keep their surrounding quotes verbatim.
+	// Punycode) with provider domain aliases applied, PRECIS-folded local
+	// part. Plus tags are preserved here. Quoted local parts keep their
+	// surrounding quotes verbatim.
 	Address string
 	// Root is the alias-collapsed form: provider rules applied (e.g. plus
 	// tag stripped, Gmail dots removed). May equal Address when no rules apply.
@@ -305,7 +313,16 @@ func buildUnquoted(address string) (NormalizedEmail, error) {
 		return NormalizedEmail{}, NewValidationError("email", "has an invalid local part")
 	}
 
+	// The mailbox is the address unless a provider alias renamed the domain.
+	mailbox := canonicalAddress
+	if asciiDomain != canonical {
+		if mailbox = foldedLocal + "@" + asciiDomain; len(mailbox) > maxEmailLength {
+			return NormalizedEmail{}, NewValidationError("email", msgEmailTooLong)
+		}
+	}
+
 	return NormalizedEmail{
+		Mailbox:      mailbox,
 		Address:      canonicalAddress,
 		Root:         aliasRoot(foldedLocal, canonical, rule),
 		Domain:       canonical,
@@ -358,6 +375,7 @@ func buildQuoted(trimmed string) (NormalizedEmail, error) {
 	}
 
 	return NormalizedEmail{
+		Mailbox:      address,
 		Address:      address,
 		Root:         address,
 		Domain:       canonical,

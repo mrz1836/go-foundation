@@ -120,7 +120,7 @@ naming. As the kit is assembled it exposes focused sub-packages:
 - **`models`** — persistence building blocks and input validation:
   - generic `BaseModel`, `Repository`, and `TemporalEdge` with append-only lifecycle helpers (`SupersedeEdge`, `EndEdge`, `SuppressEdge`); `Clock` and transaction helpers; a civil `Date`
   - email, phone, and person-name validation that accepts the ways people write them and returns one standard form, with a `ValidationError` that never includes the input:
-    - `NormalizeEmail` — canonical address and alias root; unwraps `mailto:`, brackets, and quotes; strictness options (`StrictEmail`, `RejectQuotedLocal`, `RejectTrailingDot`, `RequireDottedDomain`)
+    - `NormalizeEmail` — the mailbox mail is delivered to, the canonical address, and the alias root; unwraps `mailto:`, brackets, and quotes; strictness options (`StrictEmail`, `RejectQuotedLocal`, `RejectTrailingDot`, `RequireDottedDomain`)
     - `ParsePhone` — validates against the region's numbering plan (libphonenumber) and returns E.164 and international forms; ignores labels, punctuation, and `tel:`/`sms:` schemes; options for a default region, numbers in use only, and keypad letters
     - `NormalizePersonName` — NFC normalization with character-class and shape checks
 - **`observability`** — structured logging initialization
@@ -373,8 +373,8 @@ Absolute `ns/op` depends on the host, so treat the numbers below as a **point-in
 | Logging · large 200 | 510,092 | 10,493,183 | 22 |
 | Logging · request path | 3,234 | 6,295 | 24 |
 | Logging · error response | 3,656 | 6,402 | 29 |
-| Normalize email | 653 | 208 | 9 |
-| Normalize email · strict ¹ | 690 | 216 | 10 |
+| Normalize email ² | 850 | 256 | 10 |
+| Normalize email · strict ² | 760 | 264 | 11 |
 | Normalize phone | 195 | 32 | 2 |
 | Parse phone ¹ | 21,700 | 11,250 | 165 |
 | Normalize person name | 240 | 56 | 2 |
@@ -394,6 +394,7 @@ Absolute `ns/op` depends on the host, so treat the numbers below as a **point-in
 | Render (192 placeholders) | 28,526 | 1,551 | 9 |
 
 ¹ Measured on 2026-10-04, on the same machine and Go version.
+² Measured on 2026-10-04 with `Mailbox`, on the same machine and Go version. The benchmark's address is on an aliased domain (`googlemail.com`), which costs the one allocation more; an unaliased one doesn't.
 
 </details>
 

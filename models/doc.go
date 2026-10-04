@@ -63,7 +63,9 @@
 //
 // Input is flexible and output is standard. NormalizeEmail trims, folds case,
 // and removes the wrappers an address is pasted in (mailto:, enclosing angle
-// brackets or quotes, a trailing comma or semicolon); its options
+// brackets or quotes, a trailing comma or semicolon). It returns the Mailbox
+// mail is delivered to, the canonical Address with provider domain aliases
+// applied (googlemail.com is gmail.com), and the alias Root; its options
 // (RejectQuotedLocal, RejectTrailingDot, RequireDottedDomain, or StrictEmail
 // for all three) refuse forms the broad RFC set allows. ParsePhone drops all
 // but the digits and plus signs (labels, punctuation, tel: and sms: schemes),

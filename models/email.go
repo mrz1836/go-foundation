@@ -3,6 +3,7 @@ package models
 import (
 	"net/mail"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/net/idna"
 	"golang.org/x/text/secure/precis"
@@ -20,6 +21,9 @@ const (
 	msgEmailTooLong      = "exceeds 254 characters"
 	msgEmailLocalTooLong = "local part exceeds 64 characters"
 	msgEmailBadDomain    = "has an invalid domain"
+	msgEmailQuotedLocal  = "must not have a quoted local part"
+	msgEmailTrailingDot  = "must not end with a dot"
+	msgEmailSingleLabel  = "must have a dot in its domain"
 )
 
 // NormalizedEmail is the result of NormalizeEmail. It carries both the
@@ -46,18 +50,120 @@ type NormalizedEmail struct {
 	IsQuoted bool
 }
 
+// EmailOption narrows what NormalizeEmail accepts. Each option refuses one
+// form the broad RFC 5321/5322 set allows; StrictEmail applies them all.
+type EmailOption func(*emailRules)
+
+// emailRules is what the EmailOptions of one NormalizeEmail call refuse.
+type emailRules struct {
+	rejectQuotedLocal   bool
+	rejectTrailingDot   bool
+	requireDottedDomain bool
+}
+
+// RejectQuotedLocal refuses a quoted local part, such as "jane doe"@example.com.
+func RejectQuotedLocal() EmailOption {
+	return func(r *emailRules) { r.rejectQuotedLocal = true }
+}
+
+// RejectTrailingDot refuses an address that ends in the DNS root dot, such as
+// jane@example.com., instead of dropping the dot.
+func RejectTrailingDot() EmailOption {
+	return func(r *emailRules) { r.rejectTrailingDot = true }
+}
+
+// RequireDottedDomain refuses a single-label domain, such as jane@localhost.
+// An address on the public internet has at least one dot in its domain.
+func RequireDottedDomain() EmailOption {
+	return func(r *emailRules) { r.requireDottedDomain = true }
+}
+
+// StrictEmail applies RejectQuotedLocal, RejectTrailingDot, and
+// RequireDottedDomain: the shape of an ordinary address on the public
+// internet.
+func StrictEmail() EmailOption {
+	return func(r *emailRules) {
+		r.rejectQuotedLocal = true
+		r.rejectTrailingDot = true
+		r.requireDottedDomain = true
+	}
+}
+
 // NormalizeEmail validates an email address and produces its canonical and
-// alias-root forms. It accepts the broad RFC 5321/5322 punctuation set,
-// quoted local parts, full Unicode local parts via PRECIS (RFC 8265), and
-// internationalized domain names via IDNA (RFC 5891).
+// alias-root forms.
+//
+// Input is flexible. Surrounding whitespace is trimmed and case is folded,
+// and the wrappers an address is often pasted in are removed: a mailto:
+// scheme, one pair of enclosing angle brackets or quotes (straight or curly),
+// and one trailing comma or semicolon. None of those can be part of a valid
+// address, so removing them never changes the result for one.
+//
+// With no options it accepts the broad RFC 5321/5322 punctuation set, quoted
+// local parts, a single-label domain, a trailing root dot (dropped), full
+// Unicode local parts via PRECIS (RFC 8265), and internationalized domain
+// names via IDNA (RFC 5891). Options refuse some of those forms; nil options
+// are ignored. A display-name form (Jane <jane@example.com>) and a list of
+// addresses are always refused.
 //
 // Returns a ValidationError (wrapping ErrValidation) on any parse, length,
-// PRECIS, or IDNA failure.
-func NormalizeEmail(raw string) (NormalizedEmail, error) {
-	trimmed, err := prepareEmailInput(raw)
+// PRECIS, or IDNA failure, or a form an option refuses. No error includes the
+// input.
+func NormalizeEmail(raw string, opts ...EmailOption) (NormalizedEmail, error) {
+	rules := emailRulesFrom(opts)
+
+	cleaned := unwrapEmailInput(raw)
+	if rules.rejectTrailingDot && strings.HasSuffix(cleaned, ".") {
+		return NormalizedEmail{}, NewValidationError("email", msgEmailTrailingDot)
+	}
+
+	trimmed, err := prepareEmailInput(cleaned)
 	if err != nil {
 		return NormalizedEmail{}, err
 	}
+
+	normalized, err := normalizeTrimmed(trimmed)
+	if err != nil {
+		return NormalizedEmail{}, err
+	}
+
+	if err = rules.check(normalized); err != nil {
+		return NormalizedEmail{}, err
+	}
+
+	return normalized, nil
+}
+
+// emailRulesFrom applies opts, skipping nil ones. Without options it
+// allocates nothing: the rules escape only when an option is called.
+func emailRulesFrom(opts []EmailOption) emailRules {
+	if len(opts) == 0 {
+		return emailRules{}
+	}
+
+	rules := new(emailRules)
+	for _, opt := range opts {
+		if opt != nil {
+			opt(rules)
+		}
+	}
+
+	return *rules
+}
+
+// check refuses a normalized address in a form the rules refuse.
+func (r emailRules) check(normalized NormalizedEmail) error {
+	switch {
+	case r.rejectQuotedLocal && normalized.IsQuoted:
+		return NewValidationError("email", msgEmailQuotedLocal)
+	case r.requireDottedDomain && !strings.Contains(normalized.Domain, "."):
+		return NewValidationError("email", msgEmailSingleLabel)
+	}
+
+	return nil
+}
+
+// normalizeTrimmed normalizes a prepared address, quoted or not.
+func normalizeTrimmed(trimmed string) (NormalizedEmail, error) {
 	// Quoted local parts are RFC-special: net/mail.ParseAddress unquotes them
 	// (turning "john..doe"@example.com into john..doe@example.com), which loses
 	// the syntax that made the local part legal. We preserve the original
@@ -67,6 +173,56 @@ func NormalizeEmail(raw string) (NormalizedEmail, error) {
 	}
 
 	return normalizeUnquoted(trimmed)
+}
+
+// mailtoScheme is the URI scheme of an address copied from a link.
+const mailtoScheme = "mailto:"
+
+// unwrapEmailInput trims raw and removes, in order, one trailing comma or
+// semicolon, one pair of enclosing wrappers (emailWrapperClosing) whose inside
+// holds neither of the pair's runes, and a mailto: scheme in any case,
+// trimming after each. None of those can be part of a valid address's outer
+// form: angle brackets are refused outright, and a quote that encloses the
+// whole input leaves no @domain outside it. Input without them is returned
+// trimmed, without allocating.
+func unwrapEmailInput(raw string) string {
+	s := strings.TrimSpace(raw)
+	if strings.HasSuffix(s, ",") || strings.HasSuffix(s, ";") {
+		s = strings.TrimSpace(s[:len(s)-1])
+	}
+
+	opening, openSize := utf8.DecodeRuneInString(s)
+	last, lastSize := utf8.DecodeLastRuneInString(s)
+	if closing, ok := emailWrapperClosing(opening); ok && last == closing && len(s) >= openSize+lastSize {
+		inner := s[openSize : len(s)-lastSize]
+		if !strings.ContainsRune(inner, opening) && !strings.ContainsRune(inner, closing) {
+			s = strings.TrimSpace(inner)
+		}
+	}
+
+	if len(s) >= len(mailtoScheme) && strings.EqualFold(s[:len(mailtoScheme)], mailtoScheme) {
+		s = strings.TrimSpace(s[len(mailtoScheme):])
+	}
+
+	return s
+}
+
+// emailWrapperClosing returns the rune that closes a pair an address is
+// pasted in, given its opening rune: angle brackets, or straight or curly
+// quotes.
+func emailWrapperClosing(opening rune) (rune, bool) {
+	switch opening {
+	case '<':
+		return '>', true
+	case '"', '\'':
+		return opening, true
+	case '“':
+		return '”', true
+	case '‘':
+		return '’', true
+	}
+
+	return 0, false
 }
 
 // prepareEmailInput trims whitespace, removes a DNS-style trailing dot, and
@@ -139,6 +295,14 @@ func buildUnquoted(address string) (NormalizedEmail, error) {
 	canonicalAddress := foldedLocal + "@" + canonical
 	if len(canonicalAddress) > maxEmailLength {
 		return NormalizedEmail{}, NewValidationError("email", msgEmailTooLong)
+	}
+
+	// Folding a non-ASCII local part normalizes it, which can turn a rune into
+	// a special one (U+037E GREEK QUESTION MARK becomes ';'), so the folded
+	// address must still parse as itself. An ASCII local part is only
+	// lower-cased, which keeps it valid.
+	if !isASCII(local) && !parsesAsItself(canonicalAddress) {
+		return NormalizedEmail{}, NewValidationError("email", "has an invalid local part")
 	}
 
 	return NormalizedEmail{
@@ -244,7 +408,20 @@ func canonicalDomain(domain string) (string, error) {
 		return "", err
 	}
 
+	// IDNA maps some runes away (a soft hyphen, for one), so a domain of only
+	// those is empty once mapped.
+	if ascii == "" {
+		return "", NewValidationError("email", "has an empty domain")
+	}
+
 	return ascii, nil
+}
+
+// parsesAsItself reports whether address parses as a bare address equal to
+// itself.
+func parsesAsItself(address string) bool {
+	parsed, err := mail.ParseAddress(address)
+	return err == nil && parsed.Name == "" && parsed.Address == address
 }
 
 // foldLocal applies PRECIS UsernameCaseMapped to the local part — case-folds

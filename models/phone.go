@@ -33,6 +33,11 @@ func stripNonDigits(s string) string {
 // result that fails the E.164 regex. The errorField argument is the field name
 // reported in the validation error (e.g. "phone" or "e164") so the caller can
 // shape the error to match its own DTO.
+//
+// Deprecated: NormalizePhone checks only the shape of E.164, so it accepts
+// numbers no numbering plan allows (000-000-0000, a 7-digit local number, two
+// numbers run together). Use ParsePhone, which validates the number against
+// its region's numbering plan.
 func NormalizePhone(raw, errorField string) (string, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {

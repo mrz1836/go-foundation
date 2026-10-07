@@ -201,3 +201,18 @@ func TestBuildQuoted(t *testing.T) {
 		assert.True(t, ne.IsQuoted)
 	})
 }
+
+// TestDomainAliasesAreConsistent guards the provider tables: LookupProviderRule
+// follows one alias hop, so a canonical domain must not itself be an alias, an
+// aliased domain's own ProviderRules entry would never be read, and every
+// canonical domain needs an explicit rule.
+func TestDomainAliasesAreConsistent(t *testing.T) {
+	t.Parallel()
+
+	for alias, canonical := range domainAliases {
+		assert.NotEqual(t, alias, canonical, "%q aliases itself", alias)
+		assert.NotContains(t, domainAliases, canonical, "%q aliases %q, which is itself an alias", alias, canonical)
+		assert.NotContains(t, ProviderRules, alias, "%q is aliased, so its ProviderRules entry is never used", alias)
+		assert.Contains(t, ProviderRules, canonical, "%q aliases %q, which has no ProviderRules entry", alias, canonical)
+	}
+}

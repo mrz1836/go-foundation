@@ -98,7 +98,8 @@ func TestNormalizeEmail(t *testing.T) {
 		// ── G. Yahoo (plus only — dash is NOT a separator) ───────────────
 		{name: "yahoo dash kept in root", input: "jane-disposable@yahoo.com", wantAddr: "jane-disposable@yahoo.com", wantRoot: "jane-disposable@yahoo.com", wantDomain: "yahoo.com"},
 		{name: "yahoo plus stripped", input: "jane+tag@yahoo.com", wantAddr: "jane+tag@yahoo.com", wantRoot: "jane@yahoo.com", wantDomain: "yahoo.com"},
-		{name: "ymail collapses to yahoo", input: "jane.doe@ymail.com", wantAddr: "jane.doe@yahoo.com", wantRoot: "jane.doe@yahoo.com", wantDomain: "yahoo.com"},
+		{name: "ymail keeps its domain", input: "Jane.Doe+tag@ymail.com", wantAddr: "jane.doe+tag@ymail.com", wantRoot: "jane.doe@ymail.com", wantDomain: "ymail.com"},
+		{name: "rocketmail keeps its domain", input: "jane+tag@RocketMail.com", wantAddr: "jane+tag@rocketmail.com", wantRoot: "jane@rocketmail.com", wantDomain: "rocketmail.com"},
 
 		// ── H. iCloud / Me / Mac → icloud.com ────────────────────────────
 		{name: "icloud plus stripped", input: "jane+x@icloud.com", wantAddr: "jane+x@icloud.com", wantRoot: "jane@icloud.com", wantDomain: "icloud.com"},
@@ -113,6 +114,11 @@ func TestNormalizeEmail(t *testing.T) {
 		{name: "proton.me plus stripped", input: "jane+x@proton.me", wantAddr: "jane+x@proton.me", wantRoot: "jane@proton.me", wantDomain: "proton.me"},
 		{name: "protonmail.com self root", input: "jane@protonmail.com", wantAddr: "jane@protonmail.com", wantRoot: "jane@protonmail.com", wantDomain: "protonmail.com"},
 		{name: "pm.me plus stripped", input: "jane+x@pm.me", wantAddr: "jane+x@pm.me", wantRoot: "jane@pm.me", wantDomain: "pm.me"},
+
+		// ── J2. Yandex → yandex.ru (plus, dots preserved) ────────────────
+		{name: "yandex.ru plus stripped", input: "jane.doe+x@yandex.ru", wantAddr: "jane.doe+x@yandex.ru", wantRoot: "jane.doe@yandex.ru", wantDomain: "yandex.ru"},
+		{name: "yandex.com aliased to yandex.ru", input: "Jane@Yandex.com", wantAddr: "jane@yandex.ru", wantRoot: "jane@yandex.ru", wantDomain: "yandex.ru"},
+		{name: "ya.ru aliased to yandex.ru", input: "jane+x@ya.ru", wantAddr: "jane+x@yandex.ru", wantRoot: "jane@yandex.ru", wantDomain: "yandex.ru"},
 
 		// ── K. default provider (plus stripped, dots preserved) ──────────
 		{name: "default lowercase only", input: "Jane@example.com", wantAddr: "jane@example.com", wantRoot: "jane@example.com", wantDomain: "example.com"},
@@ -169,9 +175,16 @@ func TestLookupProviderRule(t *testing.T) {
 	}{
 		{input: "gmail.com", wantCanonical: "gmail.com", wantSeparator: '+', wantStripDots: true},
 		{input: "googlemail.com", wantCanonical: "gmail.com", wantSeparator: '+', wantStripDots: true},
-		{input: "ymail.com", wantCanonical: "yahoo.com", wantSeparator: '+'},
+		{input: "yahoo.com", wantCanonical: "yahoo.com", wantSeparator: '+'},
+		{input: "ymail.com", wantCanonical: "ymail.com", wantSeparator: '+'},
+		{input: "rocketmail.com", wantCanonical: "rocketmail.com", wantSeparator: '+'},
 		{input: "me.com", wantCanonical: "icloud.com", wantSeparator: '+'},
 		{input: "mac.com", wantCanonical: "icloud.com", wantSeparator: '+'},
+		{input: "yandex.ru", wantCanonical: "yandex.ru", wantSeparator: '+'},
+		{input: "yandex.com", wantCanonical: "yandex.ru", wantSeparator: '+'},
+		{input: "yandex.by", wantCanonical: "yandex.ru", wantSeparator: '+'},
+		{input: "yandex.kz", wantCanonical: "yandex.ru", wantSeparator: '+'},
+		{input: "ya.ru", wantCanonical: "yandex.ru", wantSeparator: '+'},
 		{input: "outlook.com", wantCanonical: "outlook.com", wantSeparator: '+'},
 		{input: "fastmail.fm", wantCanonical: "fastmail.fm", wantSeparator: '+'},
 		{input: "proton.me", wantCanonical: "proton.me", wantSeparator: '+'},
@@ -188,6 +201,39 @@ func TestLookupProviderRule(t *testing.T) {
 			assert.Equal(t, tc.wantCanonical, gotCanonical, "canonical domain mismatch")
 			assert.Equal(t, tc.wantSeparator, gotRule.Separator, "separator mismatch")
 			assert.Equal(t, tc.wantStripDots, gotRule.StripDots, "StripDots mismatch")
+		})
+	}
+}
+
+// TestNormalizeEmailKeepsSeparateDomainsApart: domains one provider runs as
+// separate namespaces are not aliases, so the same local part on each names a
+// different mailbox. Each input here is already normalized and must come back
+// unchanged as Address and Root, which keeps them all distinct.
+func TestNormalizeEmailKeepsSeparateDomainsApart(t *testing.T) {
+	t.Parallel()
+
+	inputs := []string{
+		// Yahoo: its own username pool on each domain.
+		"jane@yahoo.com", "jane@ymail.com", "jane@rocketmail.com",
+		"jane@yahoo.co.uk", "jane@yahoo.fr",
+		// Microsoft: each consumer domain is its own namespace.
+		"jane@outlook.com", "jane@hotmail.com", "jane@live.com", "jane@msn.com",
+		// Proton: no one domain is guaranteed to deliver.
+		"jane@proton.me", "jane@protonmail.com", "jane@protonmail.ch", "jane@pm.me",
+		// GMX: each address is registered separately.
+		"jane@gmx.de", "jane@gmx.net", "jane@gmx.com",
+	}
+
+	for _, in := range inputs {
+		t.Run(in, func(t *testing.T) {
+			t.Parallel()
+
+			ne, err := models.NormalizeEmail(in)
+			require.NoError(t, err)
+			assert.Equal(t, in, ne.Mailbox, "Mailbox mismatch")
+			assert.Equal(t, in, ne.Address, "Address mismatch")
+			assert.Equal(t, in, ne.Root, "Root mismatch")
+			assert.Equal(t, in[strings.IndexByte(in, '@')+1:], ne.Domain, "Domain mismatch")
 		})
 	}
 }

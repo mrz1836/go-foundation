@@ -15,6 +15,8 @@ package models
 //     would collapse to "mary"). We only honor "+" for Yahoo.
 //   - FastMail's subdomain alias trick (user@alias.fastmail.com) is not handled;
 //     only "+" tagging is collapsed.
+//   - Yandex delivers a login with dots to the same login with hyphens
+//     (alice.the.girl and alice-the-girl); that is not collapsed either.
 type ProviderRule struct {
 	// Separator is the rune that begins a tag suffix on the local part. Everything
 	// from the first occurrence onward is stripped when computing the alias root.
@@ -26,12 +28,28 @@ type ProviderRule struct {
 
 // domainAliases collapses provider domain variants to one canonical domain so
 // that aliased mailboxes (e.g. googlemail.com vs gmail.com) share a root.
+//
+// A domain belongs here only when the provider documents that a local part on
+// it names the same account as that local part on the canonical domain, and
+// that the account receives mail at the canonical domain. Collapsing two
+// domains that merely share an operator merges different people's addresses
+// into one Address and Root. These are not aliases:
+//   - ymail.com and rocketmail.com: Yahoo registers usernames on each domain
+//     separately, so jane@ymail.com and jane@yahoo.com can be two people.
+//   - Microsoft's outlook.com, hotmail.*, live.*, and msn.com, and Yahoo's
+//     regional domains (yahoo.co.uk, ...): each domain is its own namespace.
+//   - gmx.de, gmx.net, and gmx.com: each address is registered separately.
+//   - proton.me, protonmail.com, protonmail.ch, and pm.me: a username is
+//     reserved across them, but an account receives only at the addresses it
+//     has, so no one domain is guaranteed to deliver.
 var domainAliases = map[string]string{ //nolint:gochecknoglobals // provider rule table
 	"googlemail.com": "gmail.com",
-	"ymail.com":      "yahoo.com",
-	"rocketmail.com": "yahoo.com",
 	"me.com":         "icloud.com",
 	"mac.com":        "icloud.com",
+	"yandex.com":     "yandex.ru",
+	"yandex.by":      "yandex.ru",
+	"yandex.kz":      "yandex.ru",
+	"ya.ru":          "yandex.ru",
 }
 
 // ProviderRules holds the per-provider alias collapse policy, keyed by the
@@ -49,6 +67,9 @@ var ProviderRules = map[string]ProviderRule{ //nolint:gochecknoglobals // provid
 	"yahoo.co.uk":    {Separator: '+'},
 	"yahoo.fr":       {Separator: '+'},
 	"yahoo.de":       {Separator: '+'},
+	"ymail.com":      {Separator: '+'},
+	"rocketmail.com": {Separator: '+'},
+	"yandex.ru":      {Separator: '+'},
 	"fastmail.com":   {Separator: '+'},
 	"fastmail.fm":    {Separator: '+'},
 	"icloud.com":     {Separator: '+'},

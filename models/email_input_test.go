@@ -81,7 +81,8 @@ func TestNormalizeEmailMailboxKeepsTheDomainAsWritten(t *testing.T) {
 	}{
 		{name: "a domain with no alias", raw: " <Jane.Doe+News@Example.COM> ", wantMailbox: "jane.doe+news@example.com", wantAddress: "jane.doe+news@example.com"},
 		{name: "googlemail.com", raw: "Ada@GoogleMail.com", wantMailbox: "ada@googlemail.com", wantAddress: "ada@gmail.com"},
-		{name: "ymail.com", raw: "jane@ymail.com", wantMailbox: "jane@ymail.com", wantAddress: "jane@yahoo.com"},
+		{name: "ya.ru", raw: "Jane@Ya.ru", wantMailbox: "jane@ya.ru", wantAddress: "jane@yandex.ru"},
+		{name: "ymail.com, not an alias", raw: "jane@ymail.com", wantMailbox: "jane@ymail.com", wantAddress: "jane@ymail.com"},
 		{name: "me.com", raw: "mailto:Jane@Me.com", wantMailbox: "jane@me.com", wantAddress: "jane@icloud.com"},
 		{name: "an internationalized domain", raw: "JÖHN@EXÄMPLE.COM", wantMailbox: "jöhn@xn--exmple-cua.com", wantAddress: "jöhn@xn--exmple-cua.com"},
 		{name: "a quoted local part", raw: `"Jane Doe"@GoogleMail.com`, wantMailbox: `"Jane Doe"@googlemail.com`, wantAddress: `"Jane Doe"@googlemail.com`},

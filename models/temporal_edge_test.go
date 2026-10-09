@@ -234,6 +234,41 @@ func TestActiveEdgePredicate_SelectsOnlyActiveEdges(t *testing.T) {
 	assert.Equal(t, active.ID, rows[0].ID)
 }
 
+func TestCurrentEdgePredicate_Value(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t,
+		"superseded_by_id IS NULL AND suppressed_at IS NULL",
+		models.CurrentEdgePredicate)
+}
+
+func TestCurrentEdgePredicate_SelectsActiveAndEndedRows(t *testing.T) {
+	t.Parallel()
+
+	db := newEdgeDB(t)
+	validFrom := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	at := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+
+	active := &sampleEdge{TemporalEdge: models.TemporalEdge[sampleEdgeID]{ValidFrom: validFrom}}
+	require.NoError(t, db.Create(active).Error)
+
+	ended := &sampleEdge{TemporalEdge: models.TemporalEdge[sampleEdgeID]{ValidFrom: validFrom, ValidTo: &at}}
+	require.NoError(t, db.Create(ended).Error)
+
+	successor := active.ID
+	for _, replaced := range []*sampleEdge{
+		{TemporalEdge: models.TemporalEdge[sampleEdgeID]{ValidFrom: validFrom, SupersededByID: &successor}},
+		{TemporalEdge: models.TemporalEdge[sampleEdgeID]{ValidFrom: validFrom, SuppressedAt: &at}},
+	} {
+		require.NoError(t, db.Create(replaced).Error)
+	}
+
+	var rows []sampleEdge
+	require.NoError(t, db.Where(models.CurrentEdgePredicate).Find(&rows).Error)
+	require.Len(t, rows, 2)
+	assert.ElementsMatch(t, []sampleEdgeID{active.ID, ended.ID}, []sampleEdgeID{rows[0].ID, rows[1].ID})
+}
+
 func TestTemporalEdge_EdgeReturnsEmbeddedEdge(t *testing.T) {
 	t.Parallel()
 

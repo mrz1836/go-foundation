@@ -331,3 +331,190 @@ func TestTemporalEdgeLifecycle_PostgresEndEdgeCopiesCommittedValues(t *testing.T
 	require.NotNil(t, original.SupersededByID)
 	assert.Equal(t, closed.ID, *original.SupersededByID)
 }
+
+func TestTemporalEdgeLifecycle_PostgresEndEdgeAtRoundTrip(t *testing.T) {
+	db := newLifecycleEdgeDB(t)
+	transactor := models.NewTransactor(db)
+	now := time.Date(2026, 3, 1, 9, 30, 0, 0, time.UTC)
+	ctx := models.WithClock(t.Context(), models.NewFixedClock(now))
+
+	ownerA := lifecycleOwnerID(models.NewID())
+	ownerB := lifecycleOwnerID(models.NewID())
+	scopeA := models.EdgeWhere("owner_id = ?", ownerA)
+	scopeB := models.EdgeWhere("owner_id = ?", ownerB)
+
+	validFrom := time.Date(2015, 5, 2, 0, 0, 0, 0, time.UTC)
+	edge := newLifecycleEdge(ownerA, "member", 0.9)
+	edge.ValidFrom = validFrom
+	require.NoError(t, db.Create(edge).Error)
+	other := newLifecycleEdge(ownerB, "other", 0.8)
+	require.NoError(t, db.Create(other).Error)
+
+	storedEdge := storedLifecycleEdge(t, db, edge.ID)
+	storedOther := storedLifecycleEdge(t, db, other.ID)
+
+	// endCommitted ends the edge in a transaction that commits whatever the
+	// call wrote, so the rows afterwards show that a refused call wrote nothing.
+	endCommitted := func(validTo time.Time, scope models.EdgeCondition) error {
+		var endErr error
+
+		require.NoError(t, transactor.WithinTx(ctx, func(ctx context.Context) error {
+			_, endErr = models.EndEdgeAt[lifecycleEdge](ctx, edge.ID, validTo, scope)
+
+			return nil
+		}))
+
+		return endErr
+	}
+
+	// A scope that names another owner matches nothing.
+	err := endCommitted(time.Date(2019, 8, 15, 0, 0, 0, 0, time.UTC), scopeB)
+	require.ErrorIs(t, err, models.ErrNotFound)
+
+	// An end before the edge's valid_from is refused.
+	err = endCommitted(time.Date(2015, 5, 1, 23, 59, 59, 999999000, time.UTC), scopeA)
+	require.ErrorIs(t, err, models.ErrValidation)
+
+	var count int64
+	require.NoError(t, db.Model(&lifecycleEdge{}).Count(&count).Error)
+	assert.Equal(t, int64(2), count, "a refused end writes nothing")
+	assert.Equal(t, storedEdge, storedLifecycleEdge(t, db, edge.ID), "the edge is still active and unchanged")
+
+	// End the edge at a past time given in another zone, with microseconds.
+	validTo := time.Date(2019, 8, 15, 13, 45, 30, 123456000, time.FixedZone("UTC-5", -5*60*60))
+
+	var closed *lifecycleEdge
+
+	require.NoError(t, transactor.WithinTx(ctx, func(ctx context.Context) error {
+		var endErr error
+		closed, endErr = models.EndEdgeAt[lifecycleEdge](ctx, edge.ID, validTo, scopeA)
+
+		return endErr
+	}))
+	require.NotNil(t, closed)
+
+	storedClosed := storedLifecycleEdge(t, db, closed.ID)
+	require.NotNil(t, storedClosed.ValidTo)
+	assert.True(t, validTo.Equal(*storedClosed.ValidTo), "the stored end is the given instant")
+
+	var sameInstant bool
+	require.NoError(t, db.Raw(
+		"SELECT valid_to = ? FROM lifecycle_edges WHERE id = ?", validTo, string(closed.ID),
+	).Scan(&sameInstant).Error)
+	assert.True(t, sameInstant, "PostgreSQL compares the stored end equal to the given instant")
+
+	assert.True(t, now.Equal(storedClosed.RecordedAt))
+	assert.True(t, now.Equal(storedClosed.CreatedAt))
+	assert.True(t, validFrom.Equal(storedClosed.ValidFrom), "the copy keeps the edge's valid_from")
+	assert.Equal(t, ownerA, storedClosed.OwnerID)
+	assert.Equal(t, "member", storedClosed.Label)
+	require.NotNil(t, storedClosed.Confidence)
+	assert.InDelta(t, 0.9, *storedClosed.Confidence, 1e-9)
+	assert.Nil(t, storedClosed.SupersededByID)
+
+	storedAfter := storedLifecycleEdge(t, db, edge.ID)
+	assert.Nil(t, storedAfter.ValidTo, "ending an edge never writes its valid_to")
+	require.NotNil(t, storedAfter.SupersededByID)
+	assert.Equal(t, closed.ID, *storedAfter.SupersededByID)
+
+	var active int64
+	require.NoError(t, db.Model(&lifecycleEdge{}).
+		Where("owner_id = ?", ownerA).Where(models.ActiveEdgePredicate).Count(&active).Error)
+	assert.Zero(t, active, "no active edge remains for A")
+	assert.Equal(t, storedOther, storedLifecycleEdge(t, db, other.ID), "B's edge is unchanged")
+}
+
+func TestTemporalEdgeLifecycle_PostgresConcurrentReopen(t *testing.T) {
+	db := newLifecycleEdgeDB(t)
+	transactor := models.NewTransactor(db)
+	ctx := t.Context()
+	owner := lifecycleOwnerID(models.NewID())
+	scope := models.EdgeWhere("owner_id = ?", owner)
+
+	edge := newLifecycleEdge(owner, "original", 0.9)
+	require.NoError(t, db.Create(edge).Error)
+
+	var closed *lifecycleEdge
+
+	require.NoError(t, transactor.WithinTx(ctx, func(ctx context.Context) error {
+		var endErr error
+		closed, endErr = models.EndEdgeAt[lifecycleEdge](ctx, edge.ID, time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), scope)
+
+		return endErr
+	}))
+	require.NotNil(t, closed)
+
+	// Two open copies of the closed one: each call reopens the edge.
+	openA := *closed
+	openA.ID = ""
+	openA.ValidTo = nil
+	openA.Label = "from A"
+
+	openB := *closed
+	openB.ID = ""
+	openB.ValidTo = nil
+	openB.Label = "from B"
+
+	releaseA := make(chan struct{})
+	release := sync.OnceFunc(func() { close(releaseA) })
+	t.Cleanup(release)
+
+	reopened := make(chan struct{}, 1)
+	doneA := make(chan error, 1)
+
+	go func() {
+		doneA <- transactor.WithinTx(ctx, func(ctx context.Context) error {
+			if err := models.SupersedeCurrentEdge(ctx, closed.ID, &openA, scope); err != nil {
+				return err
+			}
+
+			reopened <- struct{}{}
+			<-releaseA
+
+			return nil
+		})
+	}()
+
+	receive(t, reopened, doneA, "A reopening the edge")
+
+	pidB := make(chan int64, 1)
+	doneB := make(chan error, 1)
+
+	go func() {
+		doneB <- transactor.WithinTx(ctx, func(ctx context.Context) error {
+			pid, err := backendPID(ctx)
+			if err != nil {
+				return err
+			}
+
+			pidB <- pid
+
+			return models.SupersedeCurrentEdge(ctx, closed.ID, &openB, scope)
+		})
+	}()
+
+	waitUntilBlocked(t, db, receive(t, pidB, doneB, "B's backend pid"))
+	release()
+
+	require.NoError(t, <-doneA, "the first reopen succeeds")
+	require.ErrorIs(t, <-doneB, models.ErrNotFound, "the second re-checks the predicate after waiting and matches nothing")
+
+	var rows []lifecycleEdge
+	require.NoError(t, db.Order("id").Find(&rows).Error)
+
+	ids := make([]lifecycleEdgeID, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+
+	assert.ElementsMatch(t, []lifecycleEdgeID{edge.ID, closed.ID, openA.ID}, ids, "the edge, its closed copy, and A's open copy only")
+
+	var active []lifecycleEdge
+	require.NoError(t, db.Where(models.ActiveEdgePredicate).Find(&active).Error)
+	require.Len(t, active, 1)
+	assert.Equal(t, openA.ID, active[0].ID)
+
+	storedClosed := storedLifecycleEdge(t, db, closed.ID)
+	require.NotNil(t, storedClosed.SupersededByID)
+	assert.Equal(t, openA.ID, *storedClosed.SupersededByID)
+}

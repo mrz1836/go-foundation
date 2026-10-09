@@ -58,9 +58,51 @@ func lifecycleCalls() []lifecycleCall {
 			},
 		},
 		{
+			// Ends one hour after the edge's start: inside its interval, and never
+			// after the clock's now.
+			name: "EndEdgeAt",
+			run: func(ctx context.Context, target ownedEdge, conds ...models.EdgeCondition) error {
+				_, err := models.EndEdgeAt[ownedEdge](ctx, target.ID, target.ValidFrom.Add(time.Hour), conds...)
+
+				return err
+			},
+		},
+		{
+			name: "EndEdgeAtWith",
+			run: func(ctx context.Context, target ownedEdge, conds ...models.EdgeCondition) error {
+				finish := func(closed *ownedEdge) { closed.Label = "closed" }
+				_, err := models.EndEdgeAtWith[ownedEdge](ctx, target.ID, target.ValidFrom.Add(time.Hour), finish, conds...)
+
+				return err
+			},
+		},
+		{
 			name: "SuppressEdge",
 			run: func(ctx context.Context, target ownedEdge, conds ...models.EdgeCondition) error {
 				return models.SuppressEdge[ownedEdge](ctx, target.ID, conds...)
+			},
+		},
+	}
+}
+
+// currentLifecycleCalls returns one lifecycleCall per current-row helper. They
+// can't join lifecycleCalls: its inactive-edge test requires that no helper
+// touch an ended edge, which is what these helpers exist to do. The supersede
+// call's replacement is an open edge of the target's owner.
+func currentLifecycleCalls() []lifecycleCall {
+	return []lifecycleCall{
+		{
+			name: "SupersedeCurrentEdge",
+			run: func(ctx context.Context, target ownedEdge, conds ...models.EdgeCondition) error {
+				replacement := newOwnedEdge(target.OwnerID, "reopened")
+
+				return models.SupersedeCurrentEdge(ctx, target.ID, replacement, conds...)
+			},
+		},
+		{
+			name: "SuppressCurrentEdge",
+			run: func(ctx context.Context, target ownedEdge, conds ...models.EdgeCondition) error {
+				return models.SuppressCurrentEdge[ownedEdge](ctx, target.ID, conds...)
 			},
 		},
 	}
@@ -214,6 +256,51 @@ func requireMisuseError(t *testing.T, err error) {
 
 	var fieldErr *models.ValidationError
 	require.NotErrorAs(t, err, &fieldErr)
+}
+
+// endedEdge stores an active edge for owner, ends it at 2026-02-01 with
+// EndEdgeAt, and returns the original and its closed copy, as stored.
+func endedEdge(t *testing.T, db *gorm.DB, owner edgeOwnerID) (original, closed ownedEdge) {
+	t.Helper()
+
+	stored := createEdge(t, db, newOwnedEdge(owner, "original"))
+	endedAt := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+
+	var copied *ownedEdge
+
+	require.NoError(t, callCommitted(t, t.Context(), db, func(ctx context.Context) error {
+		var endErr error
+		copied, endErr = models.EndEdgeAt[ownedEdge](ctx, stored.ID, endedAt, models.EdgeWhere("owner_id = ?", owner))
+
+		return endErr
+	}))
+
+	return edgeByID(t, db, stored.ID), edgeByID(t, db, copied.ID)
+}
+
+// currentTarget names a row a current-row helper acts on, and stores it.
+type currentTarget struct {
+	name  string
+	store func(t *testing.T, db *gorm.DB, owner edgeOwnerID) ownedEdge
+}
+
+// currentTargets returns the two rows a current-row helper acts on: an ended
+// edge's closed copy, and an active edge.
+func currentTargets() []currentTarget {
+	return []currentTarget{
+		{name: "an ended edge", store: func(t *testing.T, db *gorm.DB, owner edgeOwnerID) ownedEdge {
+			t.Helper()
+
+			_, closed := endedEdge(t, db, owner)
+
+			return closed
+		}},
+		{name: "an active edge", store: func(t *testing.T, db *gorm.DB, owner edgeOwnerID) ownedEdge {
+			t.Helper()
+
+			return createEdge(t, db, newOwnedEdge(owner, "active"))
+		}},
+	}
 }
 
 func TestEdgeLifecycle_ScopeMismatchWritesNothing(t *testing.T) {
@@ -438,6 +525,322 @@ func TestEndEdge_ClosedCopyKeepsValidFromAndProvenance(t *testing.T) {
 			assert.Equal(t, originalBefore, originalAfter, "only superseded_by_id may change on the original")
 
 			assert.Empty(t, activeEdges(t, db, owner), "no active edge remains for the owner")
+		})
+	}
+}
+
+func TestEndEdgeAt_ClosedCopyEndsAtTheGivenTime(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 3, 1, 9, 30, 0, 0, time.UTC)
+	cases := []struct {
+		name    string
+		validTo time.Time
+	}{
+		{
+			name:    "between valid_from and now, in another zone",
+			validTo: time.Date(2026, 2, 14, 13, 45, 30, 0, time.FixedZone("UTC-5", -5*60*60)),
+		},
+		{name: "at valid_from", validTo: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
+		{name: "at the clock's now", validTo: now},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			db := newLifecycleDB(t)
+			owner := newOwnerID()
+			original := createEdge(t, db, newOwnedEdge(owner, "original"))
+			originalBefore := edgeByID(t, db, original.ID)
+
+			ctx := models.WithClock(t.Context(), models.NewFixedClock(now))
+
+			var closed *ownedEdge
+
+			require.NoError(t, callCommitted(t, ctx, db, func(ctx context.Context) error {
+				var endErr error
+				closed, endErr = models.EndEdgeAt[ownedEdge](ctx, original.ID, tc.validTo, models.EdgeWhere("owner_id = ?", owner))
+
+				return endErr
+			}))
+			require.NotNil(t, closed)
+
+			parsed, err := uuid.Parse(string(closed.ID))
+			require.NoError(t, err)
+			assert.Equal(t, uuid.Version(7), parsed.Version())
+			assert.NotEqual(t, original.ID, closed.ID)
+
+			// The copy is the original, field by field, with a new ID, ended at
+			// the given time, and stamped at the clock's now.
+			want := originalBefore
+			want.ID = closed.ID
+			want.ValidTo = &tc.validTo
+			want.RecordedAt = now
+			want.CreatedAt = now
+			assert.Equal(t, utcEdge(want), utcEdge(*closed))
+
+			stored := edgeByID(t, db, closed.ID)
+			require.NotNil(t, closed.ValidTo)
+			require.NotNil(t, stored.ValidTo)
+			assert.True(t, closed.ValidTo.Equal(tc.validTo), "the returned copy ends at the given time")
+			assert.True(t, stored.ValidTo.Equal(tc.validTo), "the stored copy ends at the given time")
+			assert.Equal(t, utcEdge(*closed), utcEdge(stored), "the returned copy is the stored row")
+
+			originalAfter := edgeByID(t, db, original.ID)
+			assert.Nil(t, originalAfter.ValidTo, "the original's valid_to is never written")
+			require.NotNil(t, originalAfter.SupersededByID)
+			assert.Equal(t, closed.ID, *originalAfter.SupersededByID)
+
+			originalAfter.SupersededByID = nil
+			assert.Equal(t, originalBefore, originalAfter, "only superseded_by_id may change on the original")
+
+			assert.Empty(t, activeEdges(t, db, owner), "no active edge remains for the owner")
+		})
+	}
+}
+
+func TestEndEdgeAt_RefusesZeroOrFutureTimeBeforeAnySQL(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 3, 1, 9, 30, 0, 0, time.UTC)
+	cases := []struct {
+		name    string
+		validTo time.Time
+	}{
+		{name: "zero", validTo: time.Time{}},
+		{name: "a nanosecond after now", validTo: now.Add(time.Nanosecond)},
+		{name: "a day after now", validTo: now.AddDate(0, 0, 1)},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			db := newLifecycleDB(t)
+			owner := newOwnerID()
+			stored := createEdge(t, db, newOwnedEdge(owner, "original"))
+			before := edgeRows(t, db)
+			ctx := models.WithClock(t.Context(), models.NewFixedClock(now))
+			scope := models.EdgeWhere("owner_id = ?", owner)
+
+			err := callCommitted(t, ctx, db, func(ctx context.Context) error {
+				_, endErr := models.EndEdgeAt[ownedEdge](ctx, stored.ID, tc.validTo, scope)
+
+				return endErr
+			})
+			requireMisuseError(t, err)
+			assert.Equal(t, before, edgeRows(t, db), "a refused end must write nothing")
+
+			// An id that matches no row gets the same refusal, never
+			// ErrNotFound: the time is checked before the read.
+			err = callCommitted(t, ctx, db, func(ctx context.Context) error {
+				_, endErr := models.EndEdgeAt[ownedEdge](ctx, ownedEdgeID(models.NewID()), tc.validTo, scope)
+
+				return endErr
+			})
+			requireMisuseError(t, err)
+			require.NotErrorIs(t, err, models.ErrNotFound)
+			assert.Equal(t, before, edgeRows(t, db), "a refused end must write nothing")
+		})
+	}
+}
+
+func TestEndEdgeAt_RefusesTimeBeforeValidFrom(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 3, 1, 9, 30, 0, 0, time.UTC)
+	cases := []struct {
+		name      string
+		validFrom time.Time
+		validTo   time.Time
+	}{
+		{
+			name:      "a nanosecond before valid_from",
+			validFrom: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+			validTo:   time.Date(2025, 12, 31, 23, 59, 59, 999999999, time.UTC),
+		},
+		{
+			name:      "a year before valid_from",
+			validFrom: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+			validTo:   time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			// EndEdge ends this edge at now; EndEdgeAt refuses the same end.
+			name:      "valid_from after the clock's now",
+			validFrom: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+			validTo:   now,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			db := newLifecycleDB(t)
+			owner := newOwnerID()
+			seed := newOwnedEdge(owner, "original")
+			seed.ValidFrom = tc.validFrom
+			original := createEdge(t, db, seed)
+			before := edgeRows(t, db)
+			ctx := models.WithClock(t.Context(), models.NewFixedClock(now))
+
+			err := callCommitted(t, ctx, db, func(ctx context.Context) error {
+				_, endErr := models.EndEdgeAt[ownedEdge](ctx, original.ID, tc.validTo, models.EdgeWhere("owner_id = ?", owner))
+
+				return endErr
+			})
+
+			requireMisuseError(t, err)
+			assert.Equal(t, before, edgeRows(t, db), "a refused end must write nothing")
+
+			active := activeEdges(t, db, owner)
+			require.Len(t, active, 1)
+			assert.Equal(t, original.ID, active[0].ID, "the edge stays active")
+		})
+	}
+}
+
+func TestEndEdgeAtWith_FinishSetsOnlyTheCopysOwnColumns(t *testing.T) {
+	t.Parallel()
+
+	db := newLifecycleDB(t)
+	owner := newOwnerID()
+	original := createEdge(t, db, newOwnedEdge(owner, "original"))
+
+	now := time.Date(2026, 3, 1, 9, 30, 0, 0, time.UTC)
+	validTo := time.Date(2026, 2, 14, 12, 0, 0, 0, time.UTC)
+	ctx := models.WithClock(t.Context(), models.NewFixedClock(now))
+
+	// finish sets the copy's own column, and also tries to set the columns the
+	// helper owns.
+	stale := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	presetID := ownedEdgeID(models.NewID())
+	finish := func(closed *ownedEdge) {
+		closed.Label = "closed"
+		closed.ID = presetID
+		closed.ValidTo = &stale
+		closed.RecordedAt = stale
+		closed.CreatedAt = stale
+	}
+
+	var closed *ownedEdge
+
+	require.NoError(t, callCommitted(t, ctx, db, func(ctx context.Context) error {
+		var endErr error
+		closed, endErr = models.EndEdgeAtWith[ownedEdge](
+			ctx, original.ID, validTo, finish, models.EdgeWhere("owner_id = ?", owner),
+		)
+
+		return endErr
+	}))
+	require.NotNil(t, closed)
+
+	for _, got := range []ownedEdge{*closed, edgeByID(t, db, closed.ID)} {
+		assert.Equal(t, "closed", got.Label, "finish sets the copy's own column")
+		assert.NotEqual(t, presetID, got.ID, "finish can't set the copy's ID")
+
+		parsed, err := uuid.Parse(string(got.ID))
+		require.NoError(t, err)
+		assert.Equal(t, uuid.Version(7), parsed.Version())
+
+		require.NotNil(t, got.ValidTo)
+		assert.True(t, got.ValidTo.Equal(validTo), "finish can't move the end")
+		assert.True(t, got.RecordedAt.Equal(now), "finish can't set recorded_at")
+		assert.True(t, got.CreatedAt.Equal(now), "finish can't set created_at")
+	}
+
+	assert.Equal(t, "original", edgeByID(t, db, original.ID).Label, "finish never touches the original")
+}
+
+func TestEndEdgeAtWith_RefusedCallNeverRunsFinish(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 3, 1, 9, 30, 0, 0, time.UTC)
+	validTo := time.Date(2026, 2, 14, 12, 0, 0, 0, time.UTC)
+	refusals := []struct {
+		name       string
+		validTo    time.Time
+		otherOwner bool
+		wantErr    error
+	}{
+		{name: "zero time", validTo: time.Time{}, wantErr: models.ErrValidation},
+		{name: "future time", validTo: now.Add(time.Hour), wantErr: models.ErrValidation},
+		{name: "time before valid_from", validTo: time.Date(2025, 12, 31, 0, 0, 0, 0, time.UTC), wantErr: models.ErrValidation},
+		{name: "another owner's scope", validTo: validTo, otherOwner: true, wantErr: models.ErrNotFound},
+	}
+
+	for _, tc := range refusals {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			db := newLifecycleDB(t)
+			owner := newOwnerID()
+			target := createEdge(t, db, newOwnedEdge(owner, "original"))
+			before := edgeRows(t, db)
+			ctx := models.WithClock(t.Context(), models.NewFixedClock(now))
+
+			scopeOwner := owner
+			if tc.otherOwner {
+				scopeOwner = newOwnerID()
+			}
+
+			calls := 0
+			finish := func(*ownedEdge) { calls++ }
+
+			err := callCommitted(t, ctx, db, func(ctx context.Context) error {
+				_, endErr := models.EndEdgeAtWith[ownedEdge](
+					ctx, target.ID, tc.validTo, finish, models.EdgeWhere("owner_id = ?", scopeOwner),
+				)
+
+				return endErr
+			})
+
+			// Every refusal here is a programming error or no match, never a
+			// client's field error.
+			require.ErrorIs(t, err, tc.wantErr)
+
+			var fieldErr *models.ValidationError
+			require.NotErrorAs(t, err, &fieldErr)
+
+			assert.Zero(t, calls, "a refused call never runs finish")
+			assert.Equal(t, before, edgeRows(t, db), "a refused call writes nothing")
+		})
+	}
+
+	// A copy that finish leaves superseded or suppressed is refused before
+	// anything is written.
+	leftInactive := []struct {
+		name   string
+		finish func(closed *ownedEdge)
+	}{
+		{name: "finish leaves the copy superseded", finish: func(closed *ownedEdge) {
+			successor := ownedEdgeID(models.NewID())
+			closed.SupersededByID = &successor
+		}},
+		{name: "finish leaves the copy suppressed", finish: func(closed *ownedEdge) { closed.SuppressedAt = &now }},
+	}
+
+	for _, tc := range leftInactive {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			db := newLifecycleDB(t)
+			owner := newOwnerID()
+			target := createEdge(t, db, newOwnedEdge(owner, "original"))
+			before := edgeRows(t, db)
+			ctx := models.WithClock(t.Context(), models.NewFixedClock(now))
+
+			err := callCommitted(t, ctx, db, func(ctx context.Context) error {
+				_, endErr := models.EndEdgeAtWith[ownedEdge](
+					ctx, target.ID, validTo, tc.finish, models.EdgeWhere("owner_id = ?", owner),
+				)
+
+				return endErr
+			})
+
+			requireMisuseError(t, err)
+			assert.Equal(t, before, edgeRows(t, db), "a copy left superseded or suppressed is never written")
 		})
 	}
 }
@@ -682,4 +1085,283 @@ func TestSupersedeEdge_FailedInsertRollsBackWithTransaction(t *testing.T) {
 	active := activeEdges(t, db, owner)
 	require.Len(t, active, 1)
 	assert.Equal(t, original.ID, active[0].ID)
+}
+
+func TestSupersedeCurrentEdge_ReopensAnEndedEdge(t *testing.T) {
+	t.Parallel()
+
+	for _, target := range currentTargets() {
+		t.Run(target.name, func(t *testing.T) {
+			t.Parallel()
+
+			db := newLifecycleDB(t)
+			owner := newOwnerID()
+			current := target.store(t, db, owner)
+			before := edgeRows(t, db)
+
+			// An open copy of the target: for an ended edge, its reopening.
+			open := current
+			open.ID = ""
+			open.ValidTo = nil
+			open.Label = "reopened"
+
+			// The partial unique index allows one active edge per owner, so this
+			// call succeeds only when the target is superseded before the open
+			// copy is inserted.
+			require.NoError(t, callCommitted(t, t.Context(), db, func(ctx context.Context) error {
+				return models.SupersedeCurrentEdge(ctx, current.ID, &open, models.EdgeWhere("owner_id = ?", owner))
+			}))
+
+			currentAfter := edgeByID(t, db, current.ID)
+			require.NotNil(t, currentAfter.SupersededByID)
+			assert.Equal(t, open.ID, *currentAfter.SupersededByID)
+
+			active := activeEdges(t, db, owner)
+			require.Len(t, active, 1)
+			assert.Equal(t, open.ID, active[0].ID)
+			assert.Equal(t, "reopened", active[0].Label)
+
+			// Every row stored before is unchanged, but for the target's
+			// superseded_by_id.
+			currentAfter.SupersededByID = nil
+			for _, row := range before {
+				stored := currentAfter
+				if row.ID != current.ID {
+					stored = edgeByID(t, db, row.ID)
+				}
+
+				assert.Equal(t, row, stored, "only superseded_by_id may change on the target")
+			}
+		})
+	}
+}
+
+func TestSuppressCurrentEdge_SuppressesAnEndedEdge(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 3, 1, 9, 30, 0, 0, time.UTC)
+
+	for _, target := range currentTargets() {
+		t.Run(target.name, func(t *testing.T) {
+			t.Parallel()
+
+			db := newLifecycleDB(t)
+			owner := newOwnerID()
+			current := target.store(t, db, owner)
+			before := edgeRows(t, db)
+			ctx := models.WithClock(t.Context(), models.NewFixedClock(now))
+
+			require.NoError(t, callCommitted(t, ctx, db, func(ctx context.Context) error {
+				return models.SuppressCurrentEdge[ownedEdge](ctx, current.ID, models.EdgeWhere("owner_id = ?", owner))
+			}))
+
+			stored := edgeByID(t, db, current.ID)
+			require.NotNil(t, stored.SuppressedAt)
+			assert.Equal(t, now, stored.SuppressedAt.UTC())
+
+			after := edgeRows(t, db)
+			require.Len(t, after, len(before), "suppressing inserts no row")
+
+			for i := range after {
+				if after[i].ID == current.ID {
+					after[i].SuppressedAt = nil
+				}
+			}
+
+			assert.Equal(t, before, after, "only the target's suppressed_at may change")
+			assert.Empty(t, activeEdges(t, db, owner), "no active edge remains for the owner")
+		})
+	}
+}
+
+func TestCurrentEdgeLifecycle_NeverMatchesSupersededOrSuppressedRows(t *testing.T) {
+	t.Parallel()
+
+	at := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+	states := []currentTarget{
+		{name: "superseded", store: func(t *testing.T, db *gorm.DB, owner edgeOwnerID) ownedEdge {
+			t.Helper()
+
+			// The original of an ended edge: its closed copy supersedes it.
+			original, _ := endedEdge(t, db, owner)
+
+			return original
+		}},
+		{name: "suppressed", store: func(t *testing.T, db *gorm.DB, owner edgeOwnerID) ownedEdge {
+			t.Helper()
+
+			seed := newOwnedEdge(owner, "suppressed")
+			seed.SuppressedAt = &at
+
+			return createEdge(t, db, seed)
+		}},
+	}
+
+	for _, state := range states {
+		for _, call := range currentLifecycleCalls() {
+			t.Run(state.name+"/"+call.name, func(t *testing.T) {
+				t.Parallel()
+
+				db := newLifecycleDB(t)
+				owner := newOwnerID()
+				target := state.store(t, db, owner)
+				before := edgeRows(t, db)
+
+				err := callCommitted(t, t.Context(), db, func(ctx context.Context) error {
+					return call.run(ctx, target, models.EdgeWhere("owner_id = ?", owner))
+				})
+
+				require.ErrorIs(t, err, models.ErrNotFound)
+				assert.Equal(t, before, edgeRows(t, db), "a superseded or suppressed row must never change")
+			})
+		}
+	}
+}
+
+func TestCurrentEdgeLifecycle_KeepsTheScopeAndTransactionRules(t *testing.T) {
+	t.Parallel()
+
+	for _, call := range currentLifecycleCalls() {
+		t.Run(call.name, func(t *testing.T) {
+			t.Parallel()
+
+			db := newLifecycleDB(t)
+			owner := newOwnerID()
+			_, closed := endedEdge(t, db, owner)
+			before := edgeRows(t, db)
+			scope := models.EdgeWhere("owner_id = ?", owner)
+
+			err := callCommitted(t, t.Context(), db, func(ctx context.Context) error {
+				return call.run(ctx, closed, models.EdgeWhere("owner_id = ?", newOwnerID()))
+			})
+			require.ErrorIs(t, err, models.ErrNotFound, "another owner's scope")
+			assert.Equal(t, before, edgeRows(t, db))
+
+			err = call.run(t.Context(), closed, scope)
+			require.ErrorIs(t, err, models.ErrNoTransaction, "a context with no handle")
+			assert.Equal(t, before, edgeRows(t, db))
+
+			err = call.run(models.WithTx(t.Context(), db), closed, scope)
+			require.ErrorIs(t, err, models.ErrNoTransaction, "a context whose handle is not a transaction")
+			assert.Equal(t, before, edgeRows(t, db))
+
+			for _, id := range []ownedEdgeID{"", "not-a-uuid"} {
+				malformed := closed
+				malformed.ID = id
+
+				err = callCommitted(t, t.Context(), db, func(ctx context.Context) error {
+					return call.run(ctx, malformed, scope)
+				})
+				require.ErrorIs(t, err, models.ErrInvalidID, "id %q", id)
+				assert.Equal(t, before, edgeRows(t, db))
+			}
+
+			for _, cond := range []models.EdgeCondition{models.EdgeWhere("  "), {}} {
+				err = callCommitted(t, t.Context(), db, func(ctx context.Context) error {
+					return call.run(ctx, closed, cond)
+				})
+				requireMisuseError(t, err)
+				assert.Equal(t, before, edgeRows(t, db))
+			}
+		})
+	}
+}
+
+func TestCurrentEdgeLifecycle_ConditionCannotWidenWrite(t *testing.T) {
+	t.Parallel()
+
+	for _, call := range currentLifecycleCalls() {
+		t.Run(call.name, func(t *testing.T) {
+			t.Parallel()
+
+			db := newLifecycleDB(t)
+			ownerA := newOwnerID()
+			_, closedA := endedEdge(t, db, ownerA)
+			originalB, closedB := endedEdge(t, db, newOwnerID())
+
+			// GORM leaves this fragment unparenthesized (its OR follows a
+			// newline, not a space), so unwrapped it would OR with the whole
+			// WHERE and match every current row. Wrapped, it is true for the
+			// target alone, and the call goes through on that one row.
+			err := callCommitted(t, t.Context(), db, func(ctx context.Context) error {
+				return call.run(ctx, closedA, models.EdgeWhere("label = ?\nOR 1 = 1", "no-match"))
+			})
+			require.NoError(t, err)
+
+			assert.Equal(t, originalB, edgeByID(t, db, originalB.ID), "the other owner's original must not change")
+			assert.Equal(t, closedB, edgeByID(t, db, closedB.ID), "the other owner's closed copy must not change")
+
+			closedAfter := edgeByID(t, db, closedA.ID)
+			if closedAfter.SupersededByID != nil {
+				successor := edgeByID(t, db, *closedAfter.SupersededByID)
+				assert.Equal(t, ownerA, successor.OwnerID, "the successor must be built from the target")
+			}
+		})
+	}
+}
+
+func TestCurrentEdgeLifecycle_RejectsUnbalancedCondition(t *testing.T) {
+	t.Parallel()
+
+	conditions := []struct {
+		name  string
+		query string
+	}{
+		{name: "closes the parentheses early", query: "label = ?)\nOR\n(1 = 1"},
+		{name: "leaves a parenthesis open", query: "(label = ?"},
+		{name: "line comment", query: "label = ? -- trailing"},
+		{name: "block comment", query: "label = ? /* trailing */"},
+		{name: "statement separator", query: "label = ?; SELECT 1"},
+	}
+
+	for _, cond := range conditions {
+		for _, call := range currentLifecycleCalls() {
+			t.Run(cond.name+"/"+call.name, func(t *testing.T) {
+				t.Parallel()
+
+				db := newLifecycleDB(t)
+				_, closedA := endedEdge(t, db, newOwnerID())
+				endedEdge(t, db, newOwnerID())
+				before := edgeRows(t, db)
+
+				err := callCommitted(t, t.Context(), db, func(ctx context.Context) error {
+					return call.run(ctx, closedA, models.EdgeWhere(cond.query, "no-match"))
+				})
+
+				requireMisuseError(t, err)
+				assert.Equal(t, before, edgeRows(t, db), "a refused condition must write nothing")
+			})
+		}
+	}
+}
+
+func TestSupersedeCurrentEdge_ReopenIntoAnOccupiedKeyFails(t *testing.T) {
+	t.Parallel()
+
+	db := newLifecycleDB(t)
+	owner := newOwnerID()
+	_, closed := endedEdge(t, db, owner)
+
+	// The closed copy isn't active, so the owner may hold a newer active edge.
+	newer := createEdge(t, db, newOwnedEdge(owner, "newer"))
+	before := edgeRows(t, db)
+
+	open := closed
+	open.ID = ""
+	open.ValidTo = nil
+	open.Label = "reopened"
+
+	// The update succeeds, then the insert collides with the newer edge under
+	// the partial unique index over active rows.
+	err := models.NewTransactor(db).WithinTx(t.Context(), func(ctx context.Context) error {
+		return models.SupersedeCurrentEdge(ctx, closed.ID, &open, models.EdgeWhere("owner_id = ?", owner))
+	})
+	require.ErrorIs(t, err, models.ErrDuplicateKey)
+
+	assert.Equal(t, before, edgeRows(t, db), "the rollback undoes the update that ran before the failed insert")
+	assert.Nil(t, edgeByID(t, db, closed.ID).SupersededByID, "the closed copy stays current")
+
+	active := activeEdges(t, db, owner)
+	require.Len(t, active, 1)
+	assert.Equal(t, newer.ID, active[0].ID)
 }

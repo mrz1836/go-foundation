@@ -38,16 +38,30 @@
 // # Temporal edges
 //
 // TemporalEdge is append-only. Change an edge only with SupersedeEdge (correct
-// it), EndEdge (record its end with a closed copy), or SuppressEdge (take it
-// down), inside a transaction (see Transactor). Each acts only on an active
-// edge (ActiveEdgePredicate) that matches the id and the caller's EdgeWhere
-// conditions, and returns ErrNotFound otherwise. On any error, roll the
-// transaction back; WithinTx does when its callback returns the error:
+// it), EndEdge or EndEdgeAt (record its end, now or at a given time, with a
+// closed copy), or SuppressEdge (take it down), inside a transaction (see
+// Transactor). Each acts only on an active edge (ActiveEdgePredicate) that
+// matches the id and the caller's EdgeWhere conditions, and returns
+// ErrNotFound otherwise. On any error, roll the transaction back; WithinTx does
+// when its callback returns the error:
 //
 //	err := transactor.WithinTx(ctx, func(ctx context.Context) error {
 //	    _, err := models.EndEdge[PartyPhone](ctx, edgeID, models.EdgeWhere("person_id = ?", personID))
 //	    return err
 //	})
+//
+// EndEdgeAt ends an edge at a given time instead of now, such as the date a
+// source reports: the closed copy's ValidTo is that time, which may be neither
+// zero, nor after the clock's now, nor before the edge's ValidFrom.
+// EndEdgeAtWith also lets a callback set the closed copy's own columns:
+//
+//	_, err := models.EndEdgeAt[Membership](ctx, edgeID, endedAt, models.EdgeWhere("member_id = ?", memberID))
+//
+// The helpers above act only on an active edge. To act on an edge after it
+// has ended, SupersedeCurrentEdge and SuppressCurrentEdge match its current
+// row (CurrentEdgePredicate): supersede an ended edge's closed copy with an
+// open copy to reopen it, or with another closed copy to correct its end, and
+// suppress it to take the edge down.
 //
 // The superseded_by_id column must carry no immediate foreign key to its own
 // table (none, or one declared DEFERRABLE INITIALLY DEFERRED), because a

@@ -22,6 +22,13 @@ const (
 // the index.
 const ActiveEdgePredicate = "valid_to IS NULL AND superseded_by_id IS NULL AND suppressed_at IS NULL"
 
+// CurrentEdgePredicate is the SQL condition that selects an edge's current
+// row: the one no later row supersedes and that is not suppressed, whether or
+// not it has ended. An active edge's current row is the active row; an ended
+// edge's is the closed copy that recorded its end. Its column names are
+// unqualified; qualify them when joining.
+const CurrentEdgePredicate = "superseded_by_id IS NULL AND suppressed_at IS NULL"
+
 // TemporalEdge is the substrate for time-bounded relationships. Embed the
 // typed form in any edge model (ownership, lien, mailing intent, communication,
 // agent decision). It carries real-world validity, system time, source event
@@ -40,8 +47,10 @@ const ActiveEdgePredicate = "valid_to IS NULL AND superseded_by_id IS NULL AND s
 // independent substrates. Corrections are append-only (SupersededByID,
 // SuppressedAt), so it has no soft-delete and no metadata blob.
 //
-// Change an edge's lifecycle only with SupersedeEdge, EndEdge, or
-// SuppressEdge, never by updating its columns.
+// Change an edge's lifecycle only with the lifecycle helpers (SupersedeEdge,
+// EndEdge, EndEdgeAt, EndEdgeAtWith, SuppressEdge, and, after an edge has
+// ended, SupersedeCurrentEdge and SuppressCurrentEdge), never by updating its
+// columns.
 type TemporalEdge[ID ~string] struct {
 	// ID is the UUID v7 primary key, minted on create when empty.
 	ID ID `gorm:"type:uuid;primaryKey" json:"id"`
@@ -62,7 +71,8 @@ type TemporalEdge[ID ~string] struct {
 	EventTime *time.Time `json:"event_time,omitempty"`
 
 	// SupersededByID points to the row that replaces this one: a correction
-	// (SupersedeEdge) or a closed copy that records the edge's end (EndEdge).
+	// (SupersedeEdge) or a closed copy that records the edge's end (EndEdge,
+	// EndEdgeAt, EndEdgeAtWith).
 	SupersededByID *ID `gorm:"type:uuid" json:"superseded_by_id,omitempty"`
 
 	// SuppressedAt is set by SuppressEdge when the edge is taken down.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"net/http"
+	"strconv"
 	"testing"
 
 	"github.com/aws/aws-lambda-go/events"
@@ -333,6 +334,321 @@ func TestServeHTTP_RemoteAddrFromSourceIP(t *testing.T) {
 			require.NoError(t, err)
 
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestServeHTTP_NotModifiedHasNoBody(t *testing.T) {
+	t.Parallel()
+
+	var (
+		written  int
+		writeErr error
+	)
+
+	notModifiedHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", "2")
+		w.Header().Set("Transfer-Encoding", "chunked") //nolint:gosec // G113: both body headers are set to check that a 304 drops them
+		w.Header().Set("ETag", `"v1"`)
+		w.WriteHeader(http.StatusNotModified)
+		written, writeErr = w.Write([]byte(`{}`))
+	})
+
+	event := events.APIGatewayV2HTTPRequest{
+		RawPath: "/v1/items",
+		RequestContext: events.APIGatewayV2HTTPRequestContext{
+			HTTP: events.APIGatewayV2HTTPRequestContextHTTPDescription{Method: http.MethodGet},
+		},
+	}
+
+	resp, err := lambdahttp.ServeHTTP(context.Background(), event, notModifiedHandler)
+	require.NoError(t, err)
+
+	assert.Equal(t, http.StatusNotModified, resp.StatusCode)
+	assert.Empty(t, resp.Body)
+	assert.False(t, resp.IsBase64Encoded)
+
+	require.ErrorIs(t, writeErr, http.ErrBodyNotAllowed)
+	assert.Zero(t, written)
+
+	assert.NotContains(t, resp.Headers, "Content-Type")
+	assert.NotContains(t, resp.Headers, "Content-Length")
+	assert.NotContains(t, resp.Headers, "Transfer-Encoding")
+	// Header().Set canonicalises "ETag" to "Etag".
+	assert.Equal(t, `"v1"`, resp.Headers["Etag"])
+}
+
+func TestServeHTTP_NoContentHasNoBody(t *testing.T) {
+	t.Parallel()
+
+	var (
+		written  int
+		writeErr error
+	)
+
+	noContentHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", "2")
+		w.Header().Set("Transfer-Encoding", "chunked") //nolint:gosec // G113: both body headers are set to check that a 204 drops them
+		w.WriteHeader(http.StatusNoContent)
+		written, writeErr = w.Write([]byte(`{}`))
+	})
+
+	event := events.APIGatewayV2HTTPRequest{
+		RawPath: "/v1/items/1",
+		RequestContext: events.APIGatewayV2HTTPRequestContext{
+			HTTP: events.APIGatewayV2HTTPRequestContextHTTPDescription{Method: http.MethodDelete},
+		},
+	}
+
+	resp, err := lambdahttp.ServeHTTP(context.Background(), event, noContentHandler)
+	require.NoError(t, err)
+
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+	assert.Empty(t, resp.Body)
+	assert.False(t, resp.IsBase64Encoded)
+
+	require.ErrorIs(t, writeErr, http.ErrBodyNotAllowed)
+	assert.Zero(t, written)
+
+	assert.NotContains(t, resp.Headers, "Content-Length")
+	assert.NotContains(t, resp.Headers, "Transfer-Encoding")
+	// net/http keeps Content-Type on a 204; only a 304 drops it.
+	assert.Equal(t, "application/json", resp.Headers["Content-Type"])
+}
+
+func TestServeHTTP_EmptyWriteWithoutABodyIsNotAnError(t *testing.T) {
+	t.Parallel()
+
+	var (
+		written  int
+		writeErr error
+	)
+
+	// As in net/http, an empty Write succeeds even under a status that allows no body.
+	emptyWriteHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+		written, writeErr = w.Write(nil)
+	})
+
+	event := events.APIGatewayV2HTTPRequest{
+		RawPath: "/v1/items/1",
+		RequestContext: events.APIGatewayV2HTTPRequestContext{
+			HTTP: events.APIGatewayV2HTTPRequestContextHTTPDescription{Method: http.MethodDelete},
+		},
+	}
+
+	resp, err := lambdahttp.ServeHTTP(context.Background(), event, emptyWriteHandler)
+	require.NoError(t, err)
+
+	require.NoError(t, writeErr)
+	assert.Zero(t, written)
+
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+	assert.Empty(t, resp.Body)
+}
+
+func TestServeHTTP_HeadKeepsHeadersAndDropsTheBody(t *testing.T) {
+	t.Parallel()
+
+	body := []byte(`{"ok":true}`)
+
+	var (
+		written  int
+		writeErr error
+	)
+
+	headHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(http.StatusOK)
+		written, writeErr = w.Write(body)
+	})
+
+	event := events.APIGatewayV2HTTPRequest{
+		RawPath: "/v1/items",
+		RequestContext: events.APIGatewayV2HTTPRequestContext{
+			HTTP: events.APIGatewayV2HTTPRequestContextHTTPDescription{Method: http.MethodHead},
+		},
+	}
+
+	resp, err := lambdahttp.ServeHTTP(context.Background(), event, headHandler)
+	require.NoError(t, err)
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Empty(t, resp.Body)
+	assert.False(t, resp.IsBase64Encoded)
+
+	require.NoError(t, writeErr)
+	assert.Equal(t, len(body), written)
+
+	assert.Equal(t, map[string]string{
+		"Content-Type":   "application/json",
+		"Content-Length": strconv.Itoa(len(body)),
+		"Cache-Control":  "no-store",
+	}, resp.Headers)
+}
+
+func TestServeHTTP_FirstWriteHeaderWins(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		handler    http.HandlerFunc
+		wantStatus int
+		wantBody   string
+	}{
+		{
+			name: "a status after the body has started is ignored",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(`{"ok":true}`))
+				w.WriteHeader(http.StatusInternalServerError)
+			},
+			wantStatus: http.StatusOK,
+			wantBody:   `{"ok":true}`,
+		},
+		{
+			name: "a second status is ignored",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusCreated)
+				w.WriteHeader(http.StatusInternalServerError)
+			},
+			wantStatus: http.StatusCreated,
+			wantBody:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			event := events.APIGatewayV2HTTPRequest{
+				RawPath: "/v1/items",
+				RequestContext: events.APIGatewayV2HTTPRequestContext{
+					HTTP: events.APIGatewayV2HTTPRequestContextHTTPDescription{Method: http.MethodPost},
+				},
+			}
+
+			resp, err := lambdahttp.ServeHTTP(context.Background(), event, tt.handler)
+			require.NoError(t, err)
+
+			assert.Equal(t, tt.wantStatus, resp.StatusCode)
+			assert.Equal(t, tt.wantBody, resp.Body)
+		})
+	}
+}
+
+func TestServeHTTP_WriteBeforeWriteHeaderIsA200(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		handler func(w http.ResponseWriter) (int, error)
+	}{
+		{
+			name: "write only",
+			handler: func(w http.ResponseWriter) (int, error) {
+				return w.Write([]byte(`{"ok":true}`))
+			},
+		},
+		{
+			name: "a later 204 changes neither the status nor the body",
+			handler: func(w http.ResponseWriter) (int, error) {
+				n, err := w.Write([]byte(`{"ok":true}`))
+				w.WriteHeader(http.StatusNoContent)
+
+				return n, err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var (
+				written  int
+				writeErr error
+			)
+
+			handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				written, writeErr = tt.handler(w)
+			})
+
+			event := events.APIGatewayV2HTTPRequest{
+				RawPath: "/v1/items",
+				RequestContext: events.APIGatewayV2HTTPRequestContext{
+					HTTP: events.APIGatewayV2HTTPRequestContextHTTPDescription{Method: http.MethodGet},
+				},
+			}
+
+			resp, err := lambdahttp.ServeHTTP(context.Background(), event, handler)
+			require.NoError(t, err)
+
+			require.NoError(t, writeErr)
+			assert.Equal(t, len(`{"ok":true}`), written)
+
+			assert.Equal(t, http.StatusOK, resp.StatusCode)
+			assert.Equal(t, `{"ok":true}`, resp.Body)
+		})
+	}
+}
+
+func TestServeHTTP_InformationalStatusIsNotFinal(t *testing.T) {
+	t.Parallel()
+
+	// net/http sends a 1xx other than 101 as an interim response and keeps
+	// waiting for the final status; API Gateway can carry only the final one.
+	tests := []struct {
+		name     string
+		handler  http.HandlerFunc
+		wantBody string
+	}{
+		{
+			name: "103 then 200 and a body",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Link", "</app.css>; rel=preload; as=style")
+				w.WriteHeader(http.StatusEarlyHints)
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"ok":true}`))
+			},
+			wantBody: `{"ok":true}`,
+		},
+		{
+			name: "103 then a body",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusEarlyHints)
+				_, _ = w.Write([]byte(`{"ok":true}`))
+			},
+			wantBody: `{"ok":true}`,
+		},
+		{
+			name: "103 alone",
+			handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusEarlyHints)
+			},
+			wantBody: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			event := events.APIGatewayV2HTTPRequest{
+				RawPath: "/",
+				RequestContext: events.APIGatewayV2HTTPRequestContext{
+					HTTP: events.APIGatewayV2HTTPRequestContextHTTPDescription{Method: http.MethodGet},
+				},
+			}
+
+			resp, err := lambdahttp.ServeHTTP(context.Background(), event, tt.handler)
+			require.NoError(t, err)
+
+			assert.Equal(t, http.StatusOK, resp.StatusCode)
+			assert.Equal(t, tt.wantBody, resp.Body)
 		})
 	}
 }

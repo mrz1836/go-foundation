@@ -124,7 +124,7 @@ naming. As the kit is assembled it exposes focused sub-packages:
     - `ParsePhone` — validates against the region's numbering plan (libphonenumber) and returns E.164 and international forms; ignores labels, punctuation, and `tel:`/`sms:` schemes; options for a default region, numbers in use only, and keypad letters
     - `NormalizePersonName` — NFC normalization with character-class and shape checks
 - **`observability`** — structured logging initialization
-- **`pagination`** — cursor-based list pagination
+- **`pagination`** — opaque keyset cursors (a full-precision time and an id, versioned) and `models.WithKeyset` to page a GORM query by them, so a page break never skips a row; whole-second cursors still decode
 - **`ptr`** — generic pointer helpers (`To`, `Deref`, `DerefOr`)
 - **`recurrence`** — DST-correct next-occurrence calculator for weekly recurring event patterns
 - **`secrets`** — pluggable secret providers (env, AWS, mock)
@@ -310,8 +310,10 @@ Every benchmark in the module, linked to its source. The name links jump straigh
 | `models` | [Parse phone](models/phone_parse_test.go#L311) | Sanitizing + numbering-plan parse of a formatted national number |
 | `models` | [Normalize person name](models/person_name_test.go#L303) | NFC normalization + character-class and shape checks |
 | `models` | [Generate slug](models/slug_test.go#L83) | URL-slug transform (package-scoped regexes) |
-| `pagination` | [Encode cursor](pagination/pagination_test.go#L102) | Encoding a timestamp cursor |
-| `pagination` | [Decode cursor](pagination/pagination_test.go#L112) | Decoding a cursor string |
+| `pagination` | [Encode cursor](pagination/pagination_test.go#L150) | Encoding a timestamp cursor |
+| `pagination` | [Decode cursor](pagination/pagination_test.go#L160) | Decoding a cursor string |
+| `pagination` | [Encode keyset](pagination/keyset_test.go#L188) | Encoding a time-and-id cursor |
+| `pagination` | [Decode keyset](pagination/keyset_test.go#L200) | Decoding a time-and-id cursor |
 | `ptr` | [To](ptr/ptr_test.go#L42) | Boxing a value into a pointer (stack-allocated when it does not escape) |
 | `ptr` | [Deref](ptr/ptr_test.go#L51) | Nil-safe dereference on the non-nil path |
 | `recurrence` | [Parse HH:MM](recurrence/recurrence_internal_test.go#L51) | Hand-rolled start-time parse (hot path) |
@@ -380,7 +382,9 @@ Absolute `ns/op` depends on the host, so treat the numbers below as a **point-in
 | Normalize person name | 240 | 56 | 2 |
 | Generate slug | 1,812 | 518 | 15 |
 | Encode cursor | 16.8 | 16 | 1 |
-| Decode cursor | 22.8 | 16 | 1 |
+| Decode cursor ³ | 23.2 | 0 | 0 |
+| Encode keyset ³ | 59.4 | 160 | 2 |
+| Decode keyset ³ | 54.5 | 48 | 1 |
 | Ptr.To | 0.32 | 0 | 0 |
 | Ptr.Deref | 0.32 | 0 | 0 |
 | Parse HH:MM | 24.0 | 0 | 0 |
@@ -395,6 +399,7 @@ Absolute `ns/op` depends on the host, so treat the numbers below as a **point-in
 
 ¹ Measured on 2026-10-04, on the same machine and Go version.
 ² Measured on 2026-10-04 with `Mailbox`, on the same machine and Go version. The benchmark's address is on an aliased domain (`googlemail.com`), which costs the one allocation more; an unaliased one doesn't.
+³ Measured on 2026-10-10 with Go 1.27.2, on the same machine. The keyset benchmarks use a UUID id.
 
 </details>
 

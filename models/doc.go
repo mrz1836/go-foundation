@@ -35,6 +35,31 @@
 //	    models.WithPreload("Cities"),
 //	)
 //
+// # Keyset pagination
+//
+// WithKeyset pages a query by a pagination.Keyset position: it orders by a time
+// column and the same table's id, and keeps only the rows after the position,
+// so a page break never skips or repeats a row, however many rows share a
+// second. Fetch one row more than a page to learn whether another page exists,
+// and give the client the last row's position as an opaque cursor:
+//
+//	k, err := pagination.DecodeKeyset(cursor) // the first page is pagination.Keyset{}
+//	events, err := repo.FindAll(ctx,
+//	    models.WithKeyset("created_at", true, k),
+//	    models.WithLimit(limit+1),
+//	)
+//	if len(events) > limit {
+//	    events = events[:limit]
+//	    last := events[limit-1]
+//	    next = pagination.EncodeKeyset(last.CreatedAt, last.ID)
+//	}
+//
+// A cursor from pagination.EncodeCursor decodes as a legacy position: its
+// second is a lower bound, so the next page may repeat that second's rows but
+// never skips one. The column is written by the developer, never taken from a
+// request. On SQLite, which stores times as text, the comparison is exact only
+// for rows stored in UTC; PostgreSQL compares instants.
+//
 // # Temporal edges
 //
 // TemporalEdge is append-only. Change an edge only with SupersedeEdge (correct

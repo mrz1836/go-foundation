@@ -2,6 +2,7 @@ package pagination_test
 
 import (
 	"encoding/base64"
+	"encoding/binary"
 	"testing"
 	"time"
 
@@ -81,6 +82,53 @@ func TestDecodeCursor_InvalidInputs(t *testing.T) {
 			require.ErrorIs(t, err, pagination.ErrInvalidCursor)
 		})
 	}
+}
+
+func TestDecodeCursor_RefusesBytesItDoesNotUnderstand(t *testing.T) {
+	t.Parallel()
+
+	legacy, err := base64.URLEncoding.DecodeString(pagination.EncodeCursor(time.Unix(1_700_000_000, 0)))
+	require.NoError(t, err)
+
+	tests := []struct {
+		name   string
+		cursor string
+	}{
+		{name: "nine zero bytes", cursor: base64.URLEncoding.EncodeToString(make([]byte, 9))},
+		{name: "a whole-second cursor with a byte appended", cursor: base64.URLEncoding.EncodeToString(append(legacy, 0x01))},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, decodeErr := pagination.DecodeCursor(tt.cursor)
+			require.ErrorIs(t, decodeErr, pagination.ErrInvalidCursor)
+		})
+	}
+}
+
+func TestDecodeCursor_ReadsTheVersionOneFormat(t *testing.T) {
+	t.Parallel()
+
+	want := time.Date(2026, 3, 1, 12, 0, 0, 123456789, time.UTC)
+	cursor := base64.RawURLEncoding.EncodeToString(versionOnePayload(want, "row-1"))
+
+	got, err := pagination.DecodeCursor(cursor)
+	require.NoError(t, err)
+	assert.True(t, want.Equal(got), "got %v, want %v", got, want)
+}
+
+// versionOnePayload builds a version-1 keyset payload byte by byte: the
+// version, the big-endian Unix seconds and nanoseconds, the id's length as a
+// uvarint, and the id. Tests build it by hand so they pin the format itself.
+func versionOnePayload(at time.Time, id string) []byte {
+	b := []byte{0x01}
+	b = binary.BigEndian.AppendUint64(b, uint64(at.Unix()))       //nolint:gosec // test data: two's complement keeps every int64
+	b = binary.BigEndian.AppendUint32(b, uint32(at.Nanosecond())) //nolint:gosec // test data: a nanosecond is below 1e9
+	b = binary.AppendUvarint(b, uint64(len(id)))
+
+	return append(b, id...)
 }
 
 func TestListMeta_JSON(t *testing.T) {

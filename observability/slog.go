@@ -1,6 +1,7 @@
-// Package observability centralizes log/metric/trace setup so every binary
-// (local server, Lambda, daemon, snapshot tool, build tooling) configures slog
-// the same way.
+// Package observability sets up structured logging with log/slog, so every
+// binary (a local server, a Lambda, a daemon, a tool) logs the same way: JSON
+// on stderr, tagged with its environment, at a level read from an environment
+// variable. It sets up logging only.
 package observability
 
 import (

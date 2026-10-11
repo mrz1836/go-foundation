@@ -5,6 +5,17 @@
 // dispatches it to any http.Handler (e.g., a chi router), and converts the
 // captured response back to an APIGatewayV2HTTPResponse.
 //
+// Responses are written as net/http writes them. The first final status wins:
+// later WriteHeader calls are ignored, a Write before any WriteHeader means
+// 200, and a handler that writes nothing answers 200. An informational status
+// other than 101 Switching Protocols is dropped, because API Gateway cannot
+// carry an interim response. A 1xx, 204, or 304 response, or a response to a
+// HEAD request, has no body: a Write under a 1xx, 204, or 304 status returns
+// http.ErrBodyNotAllowed, and a Write for a HEAD request is discarded. Those
+// 1xx, 204, and 304 responses drop Content-Length and Transfer-Encoding, and a
+// 304 drops Content-Type too; a HEAD response keeps its headers, Content-Length
+// included, but drops Transfer-Encoding.
+//
 // Usage:
 //
 //	lambda.Start(func(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
@@ -45,32 +56,74 @@ var bufferPool = sync.Pool{
 var marshalJSON = json.Marshal
 
 // lambdaResponseWriter implements http.ResponseWriter and captures the response
-// so it can be converted to an APIGatewayV2HTTPResponse.
+// so it can be converted to an APIGatewayV2HTTPResponse. It records the status
+// and body the way net/http's server sends them (see the package documentation).
 type lambdaResponseWriter struct {
-	statusCode int
-	headers    http.Header
-	body       *bytes.Buffer
+	statusCode  int
+	wroteHeader bool
+	head        bool // a HEAD request: writes are discarded
+	headers     http.Header
+	body        *bytes.Buffer
 }
 
-func newLambdaResponseWriter() *lambdaResponseWriter {
+// newLambdaResponseWriter returns a writer with a pooled body buffer. head
+// reports whether the request is a HEAD request, whose body is discarded.
+func newLambdaResponseWriter(head bool) *lambdaResponseWriter {
 	buf := bufferPool.Get().(*bytes.Buffer)
 	buf.Reset()
 
 	return &lambdaResponseWriter{
 		statusCode: http.StatusOK,
+		head:       head,
 		headers:    make(http.Header),
 		body:       buf,
 	}
 }
 
-func (w *lambdaResponseWriter) Header() http.Header         { return w.headers }
-func (w *lambdaResponseWriter) WriteHeader(code int)        { w.statusCode = code }
-func (w *lambdaResponseWriter) Write(b []byte) (int, error) { return w.body.Write(b) }
+func (w *lambdaResponseWriter) Header() http.Header { return w.headers }
+
+// WriteHeader records the response status. Only the first final status counts;
+// later calls are ignored. An informational status other than 101 Switching
+// Protocols is ignored and leaves the status open: net/http sends it as an
+// interim response, which API Gateway cannot carry.
+func (w *lambdaResponseWriter) WriteHeader(code int) {
+	if w.wroteHeader || isInterimStatus(code) {
+		return
+	}
+
+	w.statusCode = code
+	w.wroteHeader = true
+}
+
+// Write buffers p as the response body, sending a 200 first if no status has
+// been written. Under a status that allows no body (1xx, 204, 304) it keeps
+// nothing and returns http.ErrBodyNotAllowed. For a HEAD request it keeps
+// nothing and reports p as written.
+func (w *lambdaResponseWriter) Write(p []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+
+	if len(p) == 0 {
+		return 0, nil
+	}
+
+	if !bodyAllowedForStatus(w.statusCode) {
+		return 0, http.ErrBodyNotAllowed
+	}
+
+	if w.head {
+		return len(p), nil
+	}
+
+	return w.body.Write(p)
+}
 
 // toAPIGatewayResponse converts the captured response to an APIGatewayV2HTTPResponse.
 // Binary bodies (non-valid-UTF-8) are base64-encoded and IsBase64Encoded is set.
 // Set-Cookie headers are routed to the dedicated Cookies field because API Gateway v2
 // does not support comma-joined Set-Cookie values in the single-value Headers map.
+// A status that allows no body drops the headers that describe one, as net/http does.
 func (w *lambdaResponseWriter) toAPIGatewayResponse() events.APIGatewayV2HTTPResponse {
 	defer bufferPool.Put(w.body)
 
@@ -79,8 +132,13 @@ func (w *lambdaResponseWriter) toAPIGatewayResponse() events.APIGatewayV2HTTPRes
 	var cookies []string
 
 	for k, v := range w.headers {
-		if http.CanonicalHeaderKey(k) == "Set-Cookie" {
+		key := http.CanonicalHeaderKey(k)
+		if key == "Set-Cookie" {
 			cookies = append(cookies, v...)
+			continue
+		}
+
+		if bodyHeaderSuppressed(w.statusCode, w.head, key) {
 			continue
 		}
 
@@ -103,6 +161,43 @@ func (w *lambdaResponseWriter) toAPIGatewayResponse() events.APIGatewayV2HTTPRes
 		Cookies:         cookies,
 		Body:            body,
 		IsBase64Encoded: isB64,
+	}
+}
+
+// isInterimStatus reports whether code is an informational status that
+// net/http sends ahead of the final response: any 1xx except 101 Switching
+// Protocols, which is final.
+func isInterimStatus(code int) bool {
+	return code >= 100 && code <= 199 && code != http.StatusSwitchingProtocols
+}
+
+// bodyAllowedForStatus reports whether a response with status code may carry a
+// body. As in net/http, 1xx, 204, and 304 responses may not.
+func bodyAllowedForStatus(code int) bool {
+	switch {
+	case code >= 100 && code <= 199:
+		return false
+	case code == http.StatusNoContent, code == http.StatusNotModified:
+		return false
+	default:
+		return true
+	}
+}
+
+// bodyHeaderSuppressed reports whether net/http leaves the canonical header key
+// off a response with status code: Transfer-Encoding on any response without a
+// body (a HEAD request's included), Content-Length when the status allows no
+// body, and Content-Type as well on a 304.
+func bodyHeaderSuppressed(code int, head bool, key string) bool {
+	switch key {
+	case "Transfer-Encoding":
+		return head || !bodyAllowedForStatus(code)
+	case "Content-Length":
+		return !bodyAllowedForStatus(code)
+	case constants.HeaderContentType:
+		return code == http.StatusNotModified
+	default:
+		return false
 	}
 }
 
@@ -203,7 +298,7 @@ func ServeHTTP(
 		}, err
 	}
 
-	w := newLambdaResponseWriter()
+	w := newLambdaResponseWriter(req.Method == http.MethodHead)
 	handler.ServeHTTP(w, req)
 
 	return w.toAPIGatewayResponse(), nil

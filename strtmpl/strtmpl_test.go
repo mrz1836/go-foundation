@@ -5,8 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mrz1836/go-foundation/strtmpl"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/mrz1836/go-foundation/strtmpl"
 )
 
 func TestRenderBasic(t *testing.T) {

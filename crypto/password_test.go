@@ -5,9 +5,10 @@ import (
 	"testing"
 	"testing/iotest"
 
-	"github.com/mrz1836/go-foundation/crypto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/mrz1836/go-foundation/crypto"
 )
 
 // cheapParams keeps argon2id fast enough for unit tests while still exercising

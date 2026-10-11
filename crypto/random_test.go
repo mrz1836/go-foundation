@@ -8,9 +8,10 @@ import (
 	"testing"
 	"testing/iotest"
 
-	"github.com/mrz1836/go-foundation/crypto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/mrz1836/go-foundation/crypto"
 )
 
 // errRandFail is returned by the fake reader used to exercise the fatal CSPRNG

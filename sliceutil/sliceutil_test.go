@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/mrz1836/go-foundation/sliceutil"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/mrz1836/go-foundation/sliceutil"
 )
 
 func TestDedupe(t *testing.T) {

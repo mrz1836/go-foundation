@@ -7,8 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mrz1836/go-foundation/crypto"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/mrz1836/go-foundation/crypto"
 )
 
 func TestSHA256Hex(t *testing.T) {

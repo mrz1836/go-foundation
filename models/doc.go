@@ -35,6 +35,25 @@
 //	    models.WithPreload("Cities"),
 //	)
 //
+// WithOrderBy and WithSelect take column names (name or table.name) that the
+// developer writes; anything else fails the query with an error wrapping
+// ErrValidation before any SQL is built. WithCondition's query and the
+// conditions given to WithPreload are SQL, so they too are written by the
+// developer, with request values passed as bound arguments. To sort by a
+// client's choice, read it against an allowlist of keys:
+//
+//	fields, err := models.ParseSort(r.URL.Query().Get("sort"), map[string]string{
+//	    "created_at": "created_at",
+//	    "name":       "display_name",
+//	})
+//	if err != nil {
+//	    return err // a *ValidationError for the "sort" field
+//	}
+//	states, err := repo.FindAll(ctx, models.WithSort(fields))
+//
+// WithSort adds no tie-breaker, so rows with equal sort values come back in
+// any order.
+//
 // # Keyset pagination
 //
 // WithKeyset pages a query by a pagination.Keyset position: it orders by a time

@@ -355,11 +355,7 @@ func prepareEdgeWrite[ID ~string](ctx context.Context, id ID, conds []EdgeCondit
 // GORM itself tells an open transaction by its connection.
 func edgeTx(ctx context.Context) (*gorm.DB, error) {
 	tx := DBFrom(ctx, nil)
-	if tx == nil || tx.Statement == nil {
-		return nil, ErrNoTransaction
-	}
-
-	if committer, ok := tx.Statement.ConnPool.(gorm.TxCommitter); !ok || committer == nil {
+	if !inTransaction(tx) {
 		return nil, ErrNoTransaction
 	}
 

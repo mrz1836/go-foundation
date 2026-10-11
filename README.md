@@ -118,7 +118,7 @@ naming. As the kit is assembled it exposes focused sub-packages:
 - **`lambda`** — AWS Lambda (API Gateway v2) ⇄ `net/http` adapter that writes responses as `net/http` does (the first final status wins; no body on 1xx, 204, 304, or HEAD)
 - **`middleware`** — logging, recovery, and request-ID HTTP middleware
 - **`models`** — persistence building blocks and input validation:
-  - generic `BaseModel`, `Repository`, and `TemporalEdge` with append-only lifecycle helpers (`SupersedeEdge`, `EndEdge`, `EndEdgeAt`, `EndEdgeAtWith`, `SuppressEdge`, and `SupersedeCurrentEdge` and `SuppressCurrentEdge` for an edge that has ended); `Clock` and transaction helpers; a civil `Date`
+  - generic `BaseModel`, `Repository`, and `TemporalEdge` with append-only lifecycle helpers (`SupersedeEdge`, `EndEdge`, `EndEdgeAt`, `EndEdgeAtWith`, `SuppressEdge`, and `SupersedeCurrentEdge` and `SuppressCurrentEdge` for an edge that has ended); `Clock` and transaction helpers, with per-transaction statement timeouts on PostgreSQL (`WithinStatementTimeout`); a civil `Date`
   - query options for `Repository`: `WithOrderBy` and `WithSelect` take only column names, never SQL, and `ParseSort` and `WithSort` sort by a client's choice through an allowlist of keys
   - email, phone, and person-name validation that accepts the ways people write them and returns one standard form, with a `ValidationError` that never includes the input:
     - `NormalizeEmail` — the mailbox mail is delivered to, the canonical address, and the alias root; unwraps `mailto:`, brackets, and quotes; strictness options (`StrictEmail`, `RejectQuotedLocal`, `RejectTrailingDot`, `RequireDottedDomain`)

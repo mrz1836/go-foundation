@@ -300,7 +300,7 @@ Every benchmark in the module, linked to its source. The name links jump straigh
 | `ctxutil` | [Request ID ← metadata](ctxutil/metadata_test.go#L187) | JSON unmarshal on the request-id extraction path |
 | `httputil` | [Write JSON](httputil/httputil_test.go#L196) | Marshal + write of a JSON response body |
 | `jsonpath` | [Eval path](jsonpath/jsonpath_test.go#L63) | Addressing a value by dotted / indexed / bracketed path |
-| `lambda` | [API Gateway → net/http](lambda/adapter_test.go#L656) | Full request/response adapter round-trip |
+| `lambda` | [API Gateway → net/http](lambda/adapter_test.go#L681) | Full request/response adapter round-trip |
 | `middleware` | [Logging · large 200](middleware/logging_test.go#L481) | Logging a large successful response body |
 | `middleware` | [Logging · request path](middleware/logging_test.go#L512) | Request/response log pair on the happy path |
 | `middleware` | [Logging · error response](middleware/logging_test.go#L543) | Capturing + logging a 4xx/5xx body |

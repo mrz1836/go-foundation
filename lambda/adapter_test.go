@@ -491,6 +491,31 @@ func TestServeHTTP_HeadKeepsHeadersAndDropsTheBody(t *testing.T) {
 	}, resp.Headers)
 }
 
+func TestServeHTTP_HeadDropsTransferEncoding(t *testing.T) {
+	t.Parallel()
+
+	headHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Transfer-Encoding", "chunked")
+		_, _ = w.Write([]byte("streamed"))
+	})
+
+	event := events.APIGatewayV2HTTPRequest{
+		RawPath: "/v1/items",
+		RequestContext: events.APIGatewayV2HTTPRequestContext{
+			HTTP: events.APIGatewayV2HTTPRequestContextHTTPDescription{Method: http.MethodHead},
+		},
+	}
+
+	resp, err := lambdahttp.ServeHTTP(context.Background(), event, headHandler)
+	require.NoError(t, err)
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Empty(t, resp.Body)
+	assert.Equal(t, map[string]string{"Content-Type": "text/plain"}, resp.Headers,
+		"a HEAD response has no body to frame, so net/http drops Transfer-Encoding")
+}
+
 func TestServeHTTP_FirstWriteHeaderWins(t *testing.T) {
 	t.Parallel()
 

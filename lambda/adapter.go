@@ -13,7 +13,8 @@
 // HEAD request, has no body: a Write under a 1xx, 204, or 304 status returns
 // http.ErrBodyNotAllowed, and a Write for a HEAD request is discarded. Those
 // 1xx, 204, and 304 responses drop Content-Length and Transfer-Encoding, and a
-// 304 drops Content-Type too; a HEAD response keeps every header.
+// 304 drops Content-Type too; a HEAD response keeps its headers, Content-Length
+// included, but drops Transfer-Encoding.
 //
 // Usage:
 //
@@ -137,7 +138,7 @@ func (w *lambdaResponseWriter) toAPIGatewayResponse() events.APIGatewayV2HTTPRes
 			continue
 		}
 
-		if bodyHeaderSuppressed(w.statusCode, key) {
+		if bodyHeaderSuppressed(w.statusCode, w.head, key) {
 			continue
 		}
 
@@ -184,16 +185,15 @@ func bodyAllowedForStatus(code int) bool {
 }
 
 // bodyHeaderSuppressed reports whether net/http leaves the canonical header key
-// off a response with status code: Content-Length and Transfer-Encoding when the
-// status allows no body, and Content-Type as well on a 304.
-func bodyHeaderSuppressed(code int, key string) bool {
-	if bodyAllowedForStatus(code) {
-		return false
-	}
-
+// off a response with status code: Transfer-Encoding on any response without a
+// body (a HEAD request's included), Content-Length when the status allows no
+// body, and Content-Type as well on a 304.
+func bodyHeaderSuppressed(code int, head bool, key string) bool {
 	switch key {
-	case "Content-Length", "Transfer-Encoding":
-		return true
+	case "Transfer-Encoding":
+		return head || !bodyAllowedForStatus(code)
+	case "Content-Length":
+		return !bodyAllowedForStatus(code)
 	case constants.HeaderContentType:
 		return code == http.StatusNotModified
 	default:

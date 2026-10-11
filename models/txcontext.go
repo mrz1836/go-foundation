@@ -28,3 +28,15 @@ func DBFrom(ctx context.Context, fallback *gorm.DB) *gorm.DB {
 
 	return fallback
 }
+
+// inTransaction reports whether db's connection is an open transaction. It
+// asks the way GORM itself does: by whether the connection can commit.
+func inTransaction(db *gorm.DB) bool {
+	if db == nil || db.Statement == nil {
+		return false
+	}
+
+	committer, ok := db.Statement.ConnPool.(gorm.TxCommitter)
+
+	return ok && committer != nil
+}

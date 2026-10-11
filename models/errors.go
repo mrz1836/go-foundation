@@ -32,6 +32,10 @@ var (
 	// ErrNoTransaction indicates that an operation which must run inside a database
 	// transaction was called with a context that carries none (see Transactor, WithTx).
 	ErrNoTransaction = errors.New("operation requires a transaction")
+
+	// ErrStatementTimeout indicates that PostgreSQL canceled a statement because
+	// it ran longer than the bound WithinStatementTimeout set.
+	ErrStatementTimeout = errors.New("statement exceeded its time limit")
 )
 
 // ValidationError wraps ErrValidation with a specific message.

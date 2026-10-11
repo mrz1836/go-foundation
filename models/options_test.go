@@ -222,3 +222,87 @@ func TestApplyOptions_Composition(t *testing.T) {
 			"conditions must apply in the order supplied")
 	})
 }
+
+func TestWithOrderBy_RefusesAnythingButAColumnName(t *testing.T) {
+	t.Parallel()
+
+	fields := []string{
+		"id; DROP TABLE opt_rows",
+		"name DESC",
+		"(CASE WHEN 1=1 THEN name END)",
+		"a.b.c",
+		"1abc",
+	}
+
+	for _, field := range fields {
+		t.Run(field, func(t *testing.T) {
+			t.Parallel()
+
+			db := newOptionTestDB(t)
+			rec := &statementRecorder{}
+			repo := models.NewRepository[optRow, string](db.Session(&gorm.Session{Logger: rec}))
+
+			_, err := repo.FindAll(t.Context(), models.WithOrderBy(field, true))
+			require.ErrorIs(t, err, models.ErrValidation)
+			assert.NotContains(t, err.Error(), field, "the error must never echo the column")
+			assert.Empty(t, rec.statements(), "a refused query sends nothing")
+			assert.True(t, db.Migrator().HasTable(&optRow{}), "the table is intact")
+		})
+	}
+}
+
+func TestWithOrderBy_RefusalStaysWithItsQuery(t *testing.T) {
+	t.Parallel()
+
+	db := newOptionTestDB(t) // the handle gorm.Open returned
+
+	var rows []optRow
+	err := models.ApplyOptions(db, models.WithOrderBy("name DESC", false)).Find(&rows).Error
+	require.ErrorIs(t, err, models.ErrValidation)
+
+	require.NoError(t, db.Find(&rows).Error, "the refusal belongs to its own query, not the shared handle")
+}
+
+func TestWithOrderBy_QuotesTableQualifiedColumns(t *testing.T) {
+	t.Parallel()
+
+	assert.Contains(t, builtSQL(t, models.WithOrderBy("opt_rows.name", true)), "ORDER BY `opt_rows`.`name` DESC")
+	assert.Contains(t, builtSQL(t, models.WithOrderBy("name", false)), "ORDER BY `name` ASC")
+}
+
+func TestWithSelect_RefusesAnythingButColumnNames(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		fields []string
+	}{
+		{name: "an expression with an alias", fields: []string{"1 AS x"}},
+		{name: "a function among names", fields: []string{"id", "count(*)"}},
+		{name: "a statement", fields: []string{"name; DROP TABLE opt_rows"}},
+		{name: "an empty name", fields: []string{""}},
+		{name: "a star", fields: []string{"*"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			db := newOptionTestDB(t)
+			rec := &statementRecorder{}
+			repo := models.NewRepository[optRow, string](db.Session(&gorm.Session{Logger: rec}))
+
+			_, err := repo.FindAll(t.Context(), models.WithSelect(tt.fields...))
+			require.ErrorIs(t, err, models.ErrValidation)
+			assert.Empty(t, rec.statements(), "a refused query sends nothing")
+		})
+	}
+}
+
+func TestWithSelect_TakesTableQualifiedNames(t *testing.T) {
+	t.Parallel()
+
+	sql := builtSQL(t, models.WithSelect("opt_rows.id", "name"))
+	assert.Contains(t, sql, "opt_rows.id")
+	assert.NotContains(t, sql, "SELECT *")
+}

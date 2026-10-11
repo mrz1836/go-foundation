@@ -119,6 +119,7 @@ naming. As the kit is assembled it exposes focused sub-packages:
 - **`middleware`** — logging, recovery, and request-ID HTTP middleware
 - **`models`** — persistence building blocks and input validation:
   - generic `BaseModel`, `Repository`, and `TemporalEdge` with append-only lifecycle helpers (`SupersedeEdge`, `EndEdge`, `EndEdgeAt`, `EndEdgeAtWith`, `SuppressEdge`, and `SupersedeCurrentEdge` and `SuppressCurrentEdge` for an edge that has ended); `Clock` and transaction helpers, with per-transaction statement timeouts on PostgreSQL (`WithinStatementTimeout`); a civil `Date`
+  - query options for `Repository`: `WithOrderBy` and `WithSelect` take only column names, never SQL, and `ParseSort` and `WithSort` sort by a client's choice through an allowlist of keys
   - email, phone, and person-name validation that accepts the ways people write them and returns one standard form, with a `ValidationError` that never includes the input:
     - `NormalizeEmail` — the mailbox mail is delivered to, the canonical address, and the alias root; unwraps `mailto:`, brackets, and quotes; strictness options (`StrictEmail`, `RejectQuotedLocal`, `RejectTrailingDot`, `RequireDottedDomain`)
     - `ParsePhone` — validates against the region's numbering plan (libphonenumber) and returns E.164 and international forms; ignores labels, punctuation, and `tel:`/`sms:` schemes; options for a default region, numbers in use only, and keypad letters
@@ -310,6 +311,7 @@ Every benchmark in the module, linked to its source. The name links jump straigh
 | `models` | [Parse phone](models/phone_parse_test.go#L311) | Sanitizing + numbering-plan parse of a formatted national number |
 | `models` | [Normalize person name](models/person_name_test.go#L303) | NFC normalization + character-class and shape checks |
 | `models` | [Generate slug](models/slug_test.go#L83) | URL-slug transform (package-scoped regexes) |
+| `models` | [Parse sort](models/sort_test.go#L201) | Reading a client's sort against an allowlist of four keys |
 | `pagination` | [Encode cursor](pagination/pagination_test.go#L150) | Encoding a timestamp cursor |
 | `pagination` | [Decode cursor](pagination/pagination_test.go#L160) | Decoding a cursor string |
 | `pagination` | [Encode keyset](pagination/keyset_test.go#L188) | Encoding a time-and-id cursor |
@@ -381,6 +383,7 @@ Absolute `ns/op` depends on the host, so treat the numbers below as a **point-in
 | Parse phone ¹ | 21,700 | 11,250 | 165 |
 | Normalize person name | 240 | 56 | 2 |
 | Generate slug | 1,812 | 518 | 15 |
+| Parse sort ³ | 142 | 112 | 2 |
 | Encode cursor | 16.8 | 16 | 1 |
 | Decode cursor ³ | 23.2 | 0 | 0 |
 | Encode keyset ³ | 59.4 | 160 | 2 |

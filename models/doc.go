@@ -104,6 +104,30 @@
 // ErrInvalidDate reports anything that is not a real calendar date from
 // 0001-01-01 through 9999-12-31. Store an optional date as *Date.
 //
+// # Statement timeouts
+//
+// WithinStatementTimeout runs a function in a transaction in which PostgreSQL
+// cancels any statement that runs longer than a time bound, and reports such a
+// statement with an error wrapping ErrStatementTimeout. Pass the read replica
+// (Repository.ReadDB) for reads and the primary for writes; a transaction that
+// ctx already carries wins:
+//
+//	err := models.WithinStatementTimeout(ctx, repo.ReadDB(), 2*time.Second,
+//	    func(ctx context.Context, tx *gorm.DB) error {
+//	        return tx.Where("name LIKE ?", prefix+"%").Find(&states).Error
+//	    })
+//	if errors.Is(err, models.ErrStatementTimeout) {
+//	    // the search ran too long
+//	}
+//
+// The bound is local to the transaction, so it ends when the transaction does,
+// and a call nested in another transaction sets the enclosing bound back when
+// it returns. On other databases there is no bound, though the function still
+// runs in a transaction. Behind a connection proxy such as Amazon RDS Proxy,
+// setting the bound pins the client connection to its database connection; a
+// role default (ALTER ROLE ... SET statement_timeout) or the proxy's
+// initialization query bounds statements and keeps the proxy's multiplexing.
+//
 // # Database Compatibility
 //
 // All components are designed for PostgreSQL (production) and SQLite (testing).

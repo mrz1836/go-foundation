@@ -2,54 +2,15 @@ package models_test
 
 import (
 	"context"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 
 	"github.com/mrz1836/go-foundation/models"
 )
-
-// statementRecorder is a GORM logger that records the SQL of every statement
-// GORM runs, so a test can tell whether any SQL ran at all.
-type statementRecorder struct {
-	mu   sync.Mutex
-	sqls []string
-}
-
-// LogMode returns the recorder unchanged; it records at every level.
-func (r *statementRecorder) LogMode(logger.LogLevel) logger.Interface { return r }
-
-// Info ignores informational messages.
-func (r *statementRecorder) Info(context.Context, string, ...any) {}
-
-// Warn ignores warnings.
-func (r *statementRecorder) Warn(context.Context, string, ...any) {}
-
-// Error ignores error messages.
-func (r *statementRecorder) Error(context.Context, string, ...any) {}
-
-// Trace records the SQL of one statement.
-func (r *statementRecorder) Trace(_ context.Context, _ time.Time, fc func() (string, int64), _ error) {
-	sql, _ := fc()
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	r.sqls = append(r.sqls, sql)
-}
-
-// statements returns a copy of the SQL recorded so far.
-func (r *statementRecorder) statements() []string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	return append([]string(nil), r.sqls...)
-}
 
 func TestWithinStatementTimeout_RefusesANonPositiveTimeout(t *testing.T) {
 	t.Parallel()

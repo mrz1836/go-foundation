@@ -89,6 +89,15 @@ func (e *entry[T]) isExpired(now time.Time) bool {
 	return now.Sub(e.checkedAt) >= e.ttl
 }
 
+// result returns the value a validation call should hand back for this entry:
+// a copy of the matched item if the entry is valid, or nil if it is not.
+func (e *entry[T]) result() *T {
+	if e.valid {
+		return copyItem(e.item)
+	}
+	return nil
+}
+
 // Stats holds a snapshot of the current cache state that can be used for
 // debugging, observability, or health checks.
 //
@@ -298,8 +307,6 @@ func New[T any](l Loader[T], match func(raw string, item T) bool, opts ...Option
 //   - Slow path: on cache miss or expired entry, acquires a write lock,
 //     refreshes the loaded set if needed, runs the match function against each
 //     loaded item, caches the result, and returns it.
-//
-//nolint:nilnil // Returning (nil, nil) is intentional - a nil item with a nil error signals "not found" without an error
 func (c *Cache[T]) Validate(ctx context.Context, rawKey string) (*T, error) {
 	now := c.now()
 	cacheKey := hashKey(rawKey)
@@ -312,10 +319,7 @@ func (c *Cache[T]) Validate(ctx context.Context, rawKey string) (*T, error) {
 
 	// Cache hit with fresh entry
 	if exists && !e.isExpired(now) {
-		if e.valid {
-			return copyItem(e.item), nil
-		}
-		return nil, nil
+		return e.result(), nil
 	}
 
 	// Cache miss or stale - need write lock
@@ -402,8 +406,9 @@ func (c *Cache[T]) Stats() Stats {
 // stores the result in the cache.
 //
 // This method is invoked only when the fast path in Validate either missed the
-// cache or found a stale entry, and it always runs under a write lock to avoid
-// race conditions while mutating internal state.
+// cache or found a stale entry. It holds the cache lock only for the brief
+// lookups and the final store; the loader refresh and the match scan run without
+// it.
 //
 // Inputs:
 //   - ctx: context used when reloading items from the loader.
@@ -417,23 +422,13 @@ func (c *Cache[T]) Stats() Stats {
 // Outputs:
 //   - *T: the matching item if the secret is valid; nil if invalid.
 //   - error: non-nil only if an attempt to refresh the loaded set fails.
-//
-//nolint:nilnil // Returning (nil, nil) is intentional - a nil item with a nil error signals "not found" without an error
 func (c *Cache[T]) validateAndCache(ctx context.Context, rawKey, cacheKey string, loadedValid bool, now time.Time) (*T, error) {
 	// Double-check the entries cache first: if another goroutine already cached a
 	// fresh result for this key between the fast-path RUnlock and here, return it
 	// directly without touching the loader.
-	c.mu.RLock()
-	if e, exists := c.entries[cacheKey]; exists && !e.isExpired(now) {
-		valid, item := e.valid, e.item
-		c.mu.RUnlock()
-
-		if valid {
-			return copyItem(item), nil
-		}
-		return nil, nil
+	if e := c.freshEntry(cacheKey, now); e != nil {
+		return e.result(), nil
 	}
-	c.mu.RUnlock()
 
 	// Miss: ensure a fresh loaded set and take an immutable snapshot of it. The
 	// refresh is single-flighted and runs without holding mu, so it never blocks
@@ -448,24 +443,50 @@ func (c *Cache[T]) validateAndCache(ctx context.Context, rawKey, cacheKey string
 	// keeps cache hits and other misses from serializing behind it.
 	result := scanLoaded(loaded, c.match, rawKey, now, c.ttl, c.invalidTTL)
 
-	// Store the result under the write lock, enforcing the size bound. A final
-	// double-check prefers an entry another goroutine may have stored meanwhile.
-	c.mu.Lock()
-	if e, exists := c.entries[cacheKey]; exists && !e.isExpired(now) {
-		result = e
-	} else {
-		if len(c.entries) >= c.maxEntries {
-			c.evictOldestLocked(now)
-		}
-		c.entries[cacheKey] = result
-	}
-	valid, item := result.valid, result.item
-	c.mu.Unlock()
+	// Store the result, preferring an entry another goroutine may have stored
+	// meanwhile.
+	return c.storeEntry(cacheKey, result, now).result(), nil
+}
 
-	if valid {
-		return copyItem(item), nil
+// freshEntry returns the cached entry for cacheKey if one exists and has not
+// expired at now, or nil otherwise.
+//
+// Concurrency:
+//   - Takes the read lock. Entries are never mutated after they are stored, so
+//     the caller may read the returned entry without holding a lock.
+func (c *Cache[T]) freshEntry(cacheKey string, now time.Time) *entry[T] {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if e, exists := c.entries[cacheKey]; exists && !e.isExpired(now) {
+		return e
 	}
-	return nil, nil
+	return nil
+}
+
+// storeEntry caches e under cacheKey, enforcing the max-entries bound, and
+// returns the entry that is now cached for the key.
+//
+// If another goroutine stored a fresh entry for cacheKey after this caller's
+// lookup missed, that entry is kept and returned instead of e, so concurrent
+// misses for the same secret all agree on one result.
+//
+// Concurrency:
+//   - Takes the write lock for the duration of the check and store.
+func (c *Cache[T]) storeEntry(cacheKey string, e *entry[T], now time.Time) *entry[T] {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if existing, exists := c.entries[cacheKey]; exists && !existing.isExpired(now) {
+		return existing
+	}
+
+	if len(c.entries) >= c.maxEntries {
+		c.evictOldestLocked(now)
+	}
+	c.entries[cacheKey] = e
+
+	return e
 }
 
 // loadedSnapshot returns an immutable snapshot of the loaded set, refreshing it

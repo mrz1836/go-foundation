@@ -113,6 +113,12 @@ naming. As the kit is assembled it exposes focused sub-packages:
 - **`ctxutil`** — request-ID context propagation helpers
 - **`db`** — database connection helpers
 - **`health`** — health-check helpers
+- **`httpclient`** — outbound `*http.Client`s that are safe by default, for any SDK that takes a client or a transport:
+  - rules enforced in the transport, on every request and every redirect hop: a scheme allowlist (HTTPS only, optionally), a host allowlist, and a dial-time address guard that refuses private, loopback, link-local, metadata, CGNAT, and other non-public addresses on the address actually dialed (`IsPublicAddress`)
+  - per-phase timeouts, a bounded redirect policy with a re-check hook, response header and body size limits, no proxy unless enabled from the environment, and a minimum TLS version; contradictory options are refused
+  - presets: `Pinned(host)` for one known API and `Guarded()` for destinations not known in advance
+  - opt-in retries (exponential backoff with jitter, `Retry-After`, idempotent methods unless widened, bodies replayed through `GetBody`) and an observer hook that never sees headers, bodies, or query strings
+  - `GetJSON`, `PostJSON`, `DoJSON`, `DecodeJSON`, and `ReadBody` with bounded reads, a `StatusError` that never holds the body, and errors without a URL's userinfo or query string (`RedactError`)
 - **`httputil`** — JSON response and error helpers
 - **`jsonpath`** — address values in a decoded-JSON tree via a small JSONPath subset
 - **`lambda`** — AWS Lambda (API Gateway v2) ⇄ `net/http` adapter that writes responses as `net/http` does (the first final status wins; no body on 1xx, 204, 304, or HEAD)
@@ -128,7 +134,7 @@ naming. As the kit is assembled it exposes focused sub-packages:
 - **`pagination`** — opaque keyset cursors (a full-precision time and an id, versioned) and `models.WithKeyset` to page a GORM query by them, so a page break never skips a row; whole-second cursors still decode
 - **`ptr`** — generic pointer helpers (`To`, `Deref`, `DerefOr`)
 - **`recurrence`** — DST-correct next-occurrence calculator for weekly recurring event patterns
-- **`secrets`** — pluggable secret providers (env, AWS, mock)
+- **`secrets`** — pluggable secret providers (env, AWS, mock), and `Value`, a secret that prints, logs, and marshals as `[REDACTED]` (every `fmt` verb, `slog`, JSON, text, XML), with a constant-time `Equal`
 - **`sliceutil`** — generic slice helpers (order-preserving dedupe, set intersection)
 - **`strtmpl`** — safe `{{name}}` placeholder substitution from layered value maps
 - **`testutil`** — dependency-light generic test helpers (in-memory test database, test config, HTTP doer double, log recorder, free port); the testcontainers-backed PostgreSQL harness lives in the `testutil/pgtest` subpackage
@@ -299,6 +305,10 @@ Every benchmark in the module, linked to its source. The name links jump straigh
 | `crypto` | [Random token](crypto/random_test.go#L108) | CSPRNG opaque-token mint (16 / 32 / 64 B) |
 | `ctxutil` | [Request ID → metadata](ctxutil/metadata_test.go#L175) | JSON merge + marshal on the request-id stamping path |
 | `ctxutil` | [Request ID ← metadata](ctxutil/metadata_test.go#L187) | JSON unmarshal on the request-id extraction path |
+| `httpclient` | [Build Pinned client](httpclient/client_test.go#L488) | Building a `Pinned` client with an option (validation + transport) |
+| `httpclient` | [Pinned GET](httpclient/client_test.go#L501) | A GET to a local TLS server over a kept-alive connection, with an observer |
+| `httpclient` | [Public address guard](httpclient/guard_test.go#L159) | Judging a public IPv4, a loopback, and a NAT64 address |
+| `httpclient` | [Decode JSON](httpclient/helpers_test.go#L221) | Bounded read + decode of a small JSON response body |
 | `httputil` | [Write JSON](httputil/httputil_test.go#L196) | Marshal + write of a JSON response body |
 | `jsonpath` | [Eval path](jsonpath/jsonpath_test.go#L63) | Addressing a value by dotted / indexed / bracketed path |
 | `lambda` | [API Gateway → net/http](lambda/adapter_test.go#L681) | Full request/response adapter round-trip |
@@ -321,6 +331,7 @@ Every benchmark in the module, linked to its source. The name links jump straigh
 | `recurrence` | [Parse HH:MM](recurrence/recurrence_internal_test.go#L51) | Hand-rolled start-time parse (hot path) |
 | `recurrence` | [Parse pattern](recurrence/recurrence_internal_test.go#L60) | JSON decode of a recurrence pattern |
 | `recurrence` | [Next occurrence](recurrence/recurrence_internal_test.go#L72) | Full parse + next-occurrence computation |
+| `secrets` | [Value equal](secrets/value_test.go#L246) | Constant-time comparison of two 64-byte secrets |
 | `sliceutil` | [Dedupe](sliceutil/sliceutil_test.go#L69) | Order-preserving dedupe at 16 / 256 / 4096 elements |
 | `sliceutil` | [Intersect](sliceutil/sliceutil_test.go#L89) | Set intersection (full overlap) at 16 / 256 / 4096 elements |
 | `strtmpl` | [Render](strtmpl/strtmpl_test.go#L80) | `{{placeholder}}` substitution at 3 / 24 / 192 placeholders |
@@ -370,6 +381,12 @@ Absolute `ns/op` depends on the host, so treat the numbers below as a **point-in
 | Random token (32 B) | 309 | 128 | 3 |
 | Request ID → metadata | 903 | 593 | 16 |
 | Request ID ← metadata | 278 | 16 | 1 |
+| Build Pinned client ⁴ | 846 | 2,536 | 36 |
+| Pinned GET (local TLS) ⁴ | 50,053 | 8,834 | 101 |
+| Public address guard (public IPv4) ⁴ | 71.0 | 0 | 0 |
+| Public address guard (loopback) ⁴ | 5.32 | 0 | 0 |
+| Public address guard (NAT64) ⁴ | 147 | 0 | 0 |
+| Decode JSON ⁴ | 666 | 632 | 5 |
 | Write JSON | 783 | 1,129 | 15 |
 | Eval (dotted path) | 84.3 | 192 | 2 |
 | Eval (bracketed path) | 112 | 224 | 3 |
@@ -393,6 +410,7 @@ Absolute `ns/op` depends on the host, so treat the numbers below as a **point-in
 | Parse HH:MM | 24.0 | 0 | 0 |
 | Parse pattern | 329 | 48 | 1 |
 | Next occurrence | 395 | 48 | 1 |
+| Value equal ⁴ | 184 | 128 | 2 |
 | Dedupe (16 elems) | 268 | 744 | 4 |
 | Dedupe (4096 elems) | 49,729 | 180,544 | 18 |
 | Intersect (16 elems) | 319 | 744 | 4 |
@@ -403,6 +421,7 @@ Absolute `ns/op` depends on the host, so treat the numbers below as a **point-in
 ¹ Measured on 2026-10-04, on the same machine and Go version.
 ² Measured on 2026-10-04 with `Mailbox`, on the same machine and Go version. The benchmark's address is on an aliased domain (`googlemail.com`), which costs the one allocation more; an unaliased one doesn't.
 ³ Measured on 2026-10-10 with Go 1.27.2, on the same machine. The keyset benchmarks use a UUID id.
+⁴ Measured on 2026-11-24 with Go 1.27.4, on the same machine.
 
 </details>
 

@@ -148,6 +148,30 @@
 // ErrInvalidDate reports anything that is not a real calendar date from
 // 0001-01-01 through 9999-12-31. Store an optional date as *Date.
 //
+// # Approximate dates
+//
+// ApproxDate holds a date known only to a day, a month, a year, or a decade,
+// qualified as exact, about, before, after, or between: its first and last
+// possible days (open when unbounded), its precision (a DatePrecision), and its
+// qualifier (a DateQualifier). NewApproxDate builds one, ParseEDTF reads its
+// EDTF (ISO 8601-2) text and EDTF writes it, and that text is its JSON and its
+// SQL form (a text column). About widens the period by one unit of the
+// precision on each side; before and after are inclusive. A month and year, a
+// month whose day is unknown, a year alone, and the days between two dates
+// (such as the birth dates an age allows) are each one value. Period gives the
+// narrowest single day, month, year, or decade that holds both bounds.
+// ErrInvalidApproxDate reports anything else, and its text never holds a date.
+// Store an optional value as *ApproxDate:
+//
+//	month, err := models.ParseEDTF("1987-09")
+//	// month.Earliest is 1987-09-01, month.Latest is 1987-09-30
+//
+//	ages, err := models.NewApproxDate(models.DateQualifierBetween, models.DatePrecisionDay,
+//	    models.Date{Year: 1984, Month: time.November, Day: 26},
+//	    models.Date{Year: 1985, Month: time.November, Day: 25})
+//	text, err := ages.EDTF()            // "[1984-11-26..1985-11-25]"
+//	first, last, p, ok := ages.Period() // the 1980s, at DatePrecisionDecade
+//
 // # Statement timeouts
 //
 // WithinStatementTimeout runs a function in a transaction in which PostgreSQL

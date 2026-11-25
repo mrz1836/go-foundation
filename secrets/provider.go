@@ -12,6 +12,10 @@
 //
 //  4. Mock Implementation (mock.go): Provides a configurable mock for testing.
 //
+// Value (value.go) holds one secret and redacts itself wherever it is printed,
+// logged, or marshaled, so a secret read from a provider can be passed around
+// without leaking into logs or errors.
+//
 // # Usage
 //
 // In local/test environments:
@@ -23,6 +27,12 @@
 //
 //	provider, err := secrets.NewAWSProvider(ctx, secretARN)
 //	allSecrets, err := provider.GetAllSecrets(ctx)
+//
+// Holding a secret:
+//
+//	key := secrets.NewValue(allSecrets["api_key"])
+//	slog.Info("calling the API", "key", key) // logs key=[REDACTED]
+//	req.Header.Set("Authorization", "Bearer "+key.Reveal())
 package secrets
 
 import (
